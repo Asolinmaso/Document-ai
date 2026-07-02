@@ -21,6 +21,7 @@ async function ensureDatabaseExists() {
     host: process.env.PGHOST || 'localhost',
     port: parseInt(process.env.PGPORT || '5432'),
     database: 'postgres',
+    ssl: process.env.PGHOST && process.env.PGHOST !== 'localhost' ? { rejectUnauthorized: false } : false
   };
 
   const client = new Client(clientConfig);
@@ -50,6 +51,7 @@ const pool = new pg.Pool({
   host: process.env.PGHOST || 'localhost',
   port: parseInt(process.env.PGPORT || '5432'),
   database: dbName,
+  ssl: process.env.PGHOST && process.env.PGHOST !== 'localhost' ? { rejectUnauthorized: false } : false
 });
 
 // Automatic migration script from db.json
