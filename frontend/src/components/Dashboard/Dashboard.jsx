@@ -7,6 +7,7 @@ import TrashView from './TrashView';
 import TemplateView from './TemplateView';
 import TemplateEditorView from './TemplateEditorView';
 import MailCenterView from './MailCenterView';
+import ExtractionView from './ExtractionView';
 import {
   LayoutDashboard,
   FileText,
@@ -15,7 +16,8 @@ import {
   User,
   Trash2,
   Search,
-  Edit
+  Edit,
+  Sparkles
 } from 'lucide-react';
 
 // Refined Solid Document Icon Component
@@ -56,6 +58,7 @@ const Sidebar = ({ activeTab, onTabClick }) => {
   const menuItems = [
     { name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { name: 'Document', icon: <FileText size={18} /> },
+    { name: 'AI Extract', icon: <Sparkles size={18} /> },
     { name: 'Template', icon: <Layers size={18} /> },
     { name: 'Mail Center', icon: <Mail size={18} /> },
     { name: 'My Profile', icon: <User size={18} /> },
@@ -102,7 +105,7 @@ const Sidebar = ({ activeTab, onTabClick }) => {
   );
 };
 
-const Topbar = ({ searchQuery, onSearchChange, activeTab }) => {
+const Topbar = ({ searchQuery, onSearchChange, activeTab, profileData }) => {
   return (
     <div className="top-bar">
       <h2>{activeTab}</h2>
@@ -126,8 +129,7 @@ const Topbar = ({ searchQuery, onSearchChange, activeTab }) => {
             />
           </div>
           <div style={{ textAlign: 'left' }}>
-            <p style={{ fontSize: '13px', fontWeight: '700', margin: 0, letterSpacing: '0.2px' }}>Manvian Business</p>
-            <p style={{ fontSize: '13px', fontWeight: '700', margin: 0, letterSpacing: '0.2px' }}>Solutions</p>
+            <p style={{ fontSize: '13px', fontWeight: '700', margin: 0, letterSpacing: '0.2px' }}>{profileData?.companyName || 'DocAI'}</p>
           </div>
         </div>
       </div>
@@ -276,9 +278,11 @@ const Dashboard = () => {
     const fetchData = async () => {
       try {
         const [docsRes, profileRes, logosRes] = await Promise.all([
-          fetch('/api/documents'),
-          fetch('/api/profile'),
-          fetch('/api/logos')
+          fetch('/api/documents', {
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }, headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } }),
+          fetch('/api/profile', {
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` }, headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } }),
+          fetch('/api/logos', { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } })
         ]);
         
         if (docsRes.ok) setAllDocs(await docsRes.json());
@@ -314,8 +318,9 @@ const Dashboard = () => {
     setProfileData(newData);
     try {
       await fetch('/api/profile', {
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        
         body: JSON.stringify(newData)
       });
     } catch (err) { console.error(err); }
@@ -326,7 +331,7 @@ const Dashboard = () => {
     try {
       await fetch('/api/logos', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        
         body: JSON.stringify(newLogos)
       });
     } catch (err) { console.error(err); }
@@ -337,8 +342,9 @@ const Dashboard = () => {
     setAllDocs([docWithId, ...allDocs]);
     try {
       await fetch('/api/documents', {
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        
         body: JSON.stringify(docWithId)
       });
     } catch (err) { console.error(err); }
@@ -353,7 +359,7 @@ const Dashboard = () => {
   const handleDeletePermanently = async (id) => {
     setAllDocs(prev => prev.filter(doc => doc.id !== id));
     try {
-      await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+      await fetch(`/api/documents/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } });
     } catch (err) { console.error(err); }
   };
 
@@ -362,7 +368,7 @@ const Dashboard = () => {
     setAllDocs(prev => prev.filter(doc => doc.status !== 'trash'));
     for (const id of trashIds) {
       try {
-        await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+        await fetch(`/api/documents/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } });
       } catch (err) { console.error(err); }
     }
   };
@@ -383,11 +389,10 @@ const Dashboard = () => {
     
     const updatedDoc = { ...docToUpdate, status: newStatus };
     setAllDocs(allDocs.map(doc => doc.id === id ? updatedDoc : doc));
-    
     try {
       await fetch(`/api/documents/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
         body: JSON.stringify(updatedDoc)
       });
     } catch (err) { console.error(err); }
@@ -427,7 +432,7 @@ const Dashboard = () => {
         setSearchQuery('');
       }} />
       <div className="main-content">
-        <Topbar searchQuery={searchQuery} onSearchChange={setSearchQuery} activeTab={currentSubView ? 'Quotation' : activeTab} />
+        <Topbar searchQuery={searchQuery} onSearchChange={setSearchQuery} activeTab={currentSubView ? 'Quotation' : activeTab} profileData={profileData} />
 
         <div style={{ flex: 1, overflowX: 'auto', overflowY: 'auto', display: 'flex', flexDirection: 'column', background: currentSubView === 'editor' ? '#FFFFFF' : 'transparent' }}>
           {currentSubView === 'editor' ? (
@@ -451,8 +456,10 @@ const Dashboard = () => {
             currentSubView === 'quotation' ? (
               <QuotationView docs={filteredQuotationDocs} onBack={() => setCurrentSubView(null)} onSelectTemplate={(doc) => { setSelectedDoc(doc); setCurrentSubView('editor'); }} onCreateNewTemplate={() => setCurrentSubView('template_editor')} searchQuery={searchQuery} />
             ) : (
-              <DocumentView docs={filteredDocs} searchQuery={searchQuery} onSearchChange={setSearchQuery} onActionClick={handleActionClick} onRowClick={handleRowClick} />
+              <DocumentView docs={filteredDocs} searchQuery={searchQuery} onSearchChange={setSearchQuery} onActionClick={handleActionClick} onRowClick={handleRowClick} onDeleteDocument={handleDeleteDocument} onEditDocument={handleEditDocument} />
             )
+          ) : activeTab === 'AI Extract' ? (
+            <ExtractionView />
           ) : activeTab === 'Template' ? (
             <TemplateView 
               templates={activeDocs} 

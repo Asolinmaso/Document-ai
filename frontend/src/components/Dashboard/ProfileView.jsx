@@ -35,6 +35,12 @@ const ProfileView = ({ savedData, onUpdateProfile, companyLogos, onUpdateLogos }
   const [editData, setEditData] = useState({ ...emptyFormState });
   const [logoName, setLogoName] = useState('No File Chosen');
 
+  React.useEffect(() => {
+    if (savedData) {
+      setEditData(prev => ({ ...prev, ...savedData }));
+    }
+  }, [savedData]);
+
   const handleInputChange = (field, value) => {
     setEditData(prev => ({ ...prev, [field]: value }));
   };
@@ -44,15 +50,10 @@ const ProfileView = ({ savedData, onUpdateProfile, companyLogos, onUpdateLogos }
     if (e.target.files && e.target.files[0]) setLogoName(e.target.files[0].name);
   };
 
-
-
   const handleSave = async () => {
     try {
       await onUpdateProfile({ ...editData });
       alert('Profile Saved Successfully!');
-      setEditData({ ...emptyFormState });
-      setLogoName('No File Chosen');
-      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (error) {
       console.error("Failed to save profile", error);
       alert('Failed to save profile');

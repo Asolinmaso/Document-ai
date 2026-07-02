@@ -220,6 +220,32 @@ export async function initSchema() {
     try { await client.query(`ALTER TABLE mail ADD COLUMN message_id VARCHAR(255) UNIQUE`); } catch (e) {}
     try { await client.query(`ALTER TABLE mail ADD COLUMN attachments TEXT DEFAULT '[]'`); } catch (e) {}
 
+    // 5. Users table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    // 6. Extractions table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS extractions (
+        id SERIAL PRIMARY KEY,
+        document_id BIGINT REFERENCES documents(id) ON DELETE CASCADE,
+        extracted_data JSONB NOT NULL,
+        model_used VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    // Add extracted and extraction_id columns to existing documents table
+    try { await client.query(`ALTER TABLE documents ADD COLUMN extracted BOOLEAN DEFAULT false`); } catch (e) {}
+    try { await client.query(`ALTER TABLE documents ADD COLUMN extraction_id INTEGER REFERENCES extractions(id) ON DELETE SET NULL`); } catch (e) {}
+
 
     console.log('PostgreSQL schema structure verified.');
     

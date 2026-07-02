@@ -53,20 +53,25 @@ const TemplateEditorView = ({ onBack, docName = "Recruitment Template" }) => {
           </h2>
         </div>
         
-        <button style={{ 
-          background: '#6C2BD9', 
-          border: 'none', 
-          color: 'white', 
-          padding: '10px 24px', 
-          borderRadius: '8px', 
-          fontSize: '14px', 
-          fontWeight: '600', 
-          cursor: 'pointer',
-          boxShadow: '0 4px 10px rgba(108, 43, 217, 0.2)'
-        }}>
-          Save Template
-        </button>
-      </div>
+          <button 
+            onClick={() => {
+              alert('Template Saved successfully!');
+              onBack();
+            }}
+            style={{ 
+            background: '#6C2BD9', 
+            border: 'none', 
+            color: 'white', 
+            padding: '10px 24px', 
+            borderRadius: '8px', 
+            fontSize: '14px', 
+            fontWeight: '600', 
+            cursor: 'pointer',
+            boxShadow: '0 4px 10px rgba(108, 43, 217, 0.2)'
+          }}>
+            Save Template
+          </button>
+        </div>
 
       {/* Toolbar */}
       <div style={{ 

@@ -36,7 +36,7 @@ const SolidDocIcon = ({ color, size = 'md' }) => {
   );
 };
 
-const DocumentView = ({ docs = [], searchQuery = '', onActionClick }) => {
+const DocumentView = ({ docs = [], searchQuery = '', onActionClick, onRowClick, onDeleteDocument, onEditDocument }) => {
   const categories = [
     { name: 'Quotation', color: '#6366F1' },
     { name: 'Invoice', color: '#EF4444' },
@@ -65,7 +65,7 @@ const DocumentView = ({ docs = [], searchQuery = '', onActionClick }) => {
             <div 
               key={i} 
               className="action-card" 
-              onClick={() => onActionClick(`Create ${cat.name}`)}
+              onClick={() => onActionClick && onActionClick(`Create ${cat.name}`)}
               style={{ padding: '20px 10px', borderRadius: '16px', border: '1px solid #F3F4F6', background: 'white', boxShadow: '0 4px 15px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer', transition: 'transform 0.2s' }}
             >
               <SolidDocIcon color={cat.color} size="sm" />
@@ -89,7 +89,7 @@ const DocumentView = ({ docs = [], searchQuery = '', onActionClick }) => {
             </thead>
             <tbody>
               {docs.map((doc, i) => (
-                <tr key={i} style={{ borderBottom: i === docs.length - 1 ? 'none' : '1px solid #111827', cursor: 'pointer' }} onClick={() => onRowClick(doc)}>
+                <tr key={doc.id || i} style={{ borderBottom: i === docs.length - 1 ? 'none' : '1px solid #111827', cursor: 'pointer' }} onClick={() => onRowClick && onRowClick(doc)}>
                   <td style={{ padding: '20px 0' }}>
                     <div className="doc-info" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <div className="doc-icon" style={{ background: '#6C2BD9', color: 'white', borderRadius: '4px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -102,12 +102,25 @@ const DocumentView = ({ docs = [], searchQuery = '', onActionClick }) => {
                   <td style={{ padding: '20px 0', color: '#4B5563', fontSize: '14px' }}>{doc.edited}</td>
                   <td style={{ padding: '20px 0', textAlign: 'right' }}>
                     <div className="action-buttons" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                      <button style={{ background: 'none', border: '1.5px solid #E5E7EB', borderRadius: '6px', padding: '6px', color: '#9CA3AF', cursor: 'pointer' }}><Trash2 size={18} /></button>
-                      <button style={{ background: 'none', border: '1.5px solid #E5E7EB', borderRadius: '6px', padding: '6px', color: '#9CA3AF', cursor: 'pointer' }}><Edit size={18} /></button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onDeleteDocument && onDeleteDocument(doc.id); }} 
+                        style={{ background: 'none', border: '1.5px solid #E5E7EB', borderRadius: '6px', padding: '6px', color: '#9CA3AF', cursor: 'pointer' }}
+                      ><Trash2 size={18} /></button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onEditDocument && onEditDocument(doc); }} 
+                        style={{ background: 'none', border: '1.5px solid #E5E7EB', borderRadius: '6px', padding: '6px', color: '#9CA3AF', cursor: 'pointer' }}
+                      ><Edit size={18} /></button>
                     </div>
                   </td>
                 </tr>
               ))}
+              {docs.length === 0 && (
+                <tr>
+                  <td colSpan="4" style={{ textAlign: 'center', padding: '40px', color: '#9CA3AF' }}>
+                    No documents found.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -1,14 +1,33 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import GoogleAuthButton from './GoogleAuthButton';
+import { login } from '../../services/auth';
+import { useAuth } from '../../hooks/useAuth';
 
 const Login = ({ onSignupClick, onLoginSuccess }) => {
+  const { setUser } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onLoginSuccess();
+    setLoading(true);
+    setError('');
+    
+    try {
+      const data = await login(email, password);
+      if (data.token) {
+        setUser(data.user);
+        onLoginSuccess();
+      }
+    } catch (err) {
+      setError(err.message || 'Login failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -19,9 +38,18 @@ const Login = ({ onSignupClick, onLoginSuccess }) => {
           <p>Log in to your account & continue creating amazing documents.</p>
         </div>
         
+        {error && <div style={{ color: '#EF4444', marginBottom: '16px', textAlign: 'center', fontSize: '14px' }}>{error}</div>}
+
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <input type="email" className="form-control" placeholder=" " required />
+            <input 
+              type="email" 
+              className="form-control" 
+              placeholder=" " 
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required 
+            />
             <label>Email</label>
           </div>
           
@@ -34,6 +62,8 @@ const Login = ({ onSignupClick, onLoginSuccess }) => {
                 type={showPassword ? "text" : "password"} 
                 className="form-control" 
                 placeholder=" " 
+                value={password}
+                onChange={e => setPassword(e.target.value)}
                 required 
               />
               <label>Password</label>
@@ -46,7 +76,9 @@ const Login = ({ onSignupClick, onLoginSuccess }) => {
             </div>
           </div>
           
-          <button type="submit" className="btn-primary">Continue</button>
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? 'Logging in...' : 'Continue'}
+          </button>
           
           <div className="divider-container">
             <div className="divider-line"></div>
@@ -54,7 +86,11 @@ const Login = ({ onSignupClick, onLoginSuccess }) => {
             <div className="divider-line"></div>
           </div>
           
-          <GoogleAuthButton onSuccess={onLoginSuccess} text="signin_with" />
+          <GoogleAuthButton onSuccess={(res) => {
+            // Future: send Google token to backend to verify and issue local JWT
+            // For now we just bypass on UI layer, but ideally backend processes `res.credential`
+            onLoginSuccess();
+          }} text="signin_with" />
         </form>
         
         <div className="auth-footer">

@@ -2,21 +2,28 @@ import React, { useState } from 'react';
 import { Eye, EyeOff, Check, X } from 'lucide-react';
 import GoogleAuthButton from './GoogleAuthButton';
 
+import { signup, login } from '../../services/auth';
+import { useAuth } from '../../hooks/useAuth';
+
 const Signup = ({ onLoginClick, onSignupSuccess }) => {
+  const { setUser } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
-
 
   const hasMinLength = password.length >= 8;
   const hasUppercase = /[A-Z]/.test(password);
   const hasSymbol = /[!@#$%^&*(),.?":{}|<>]/.test(password);
   const passwordsMatch = password && confirmPassword && password === confirmPassword;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -30,7 +37,20 @@ const Signup = ({ onLoginClick, onSignupSuccess }) => {
       return;
     }
 
-    onSignupSuccess();
+    setLoading(true);
+    try {
+      await signup(name, email, password);
+      // Automatically login after signup
+      const data = await login(email, password);
+      if (data.token) {
+        setUser(data.user);
+        onSignupSuccess();
+      }
+    } catch (err) {
+      setError(err.message || 'Signup failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -43,17 +63,17 @@ const Signup = ({ onLoginClick, onSignupSuccess }) => {
         
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <input type="text" className="form-control" placeholder=" " required />
+            <input type="text" className="form-control" placeholder=" " value={name} onChange={e => setName(e.target.value)} required />
             <label>Name</label>
           </div>
           
           <div className="form-group">
-            <input type="email" className="form-control" placeholder=" " required />
+            <input type="email" className="form-control" placeholder=" " value={email} onChange={e => setEmail(e.target.value)} required />
             <label>Email</label>
           </div>
           
           <div className="form-group">
-            <input type="text" className="form-control" placeholder=" " required />
+            <input type="text" className="form-control" placeholder=" " value={companyName} onChange={e => setCompanyName(e.target.value)} required />
             <label>Company Name</label>
           </div>
           
@@ -111,9 +131,11 @@ const Signup = ({ onLoginClick, onSignupSuccess }) => {
             )}
           </div>
           
-          {error && <p style={{ color: '#EF4444', fontSize: '12px', marginBottom: '16px' }}>{error}</p>}
+          {error && <p style={{ color: '#EF4444', fontSize: '12px', marginBottom: '16px', textAlign: 'center' }}>{error}</p>}
           
-          <button type="submit" className="btn-primary">Create Account</button>
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? 'Creating Account...' : 'Create Account'}
+          </button>
           
           <div className="divider-container">
             <div className="divider-line"></div>

@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 
 const MockGoogleAuth = ({ onAuthSuccess, onCancel }) => {
   const [loading, setLoading] = useState(false);
+  const accounts = [
+    { name: 'Demo User', email: 'demo@example.com', avatar: 'https://ui-avatars.com/api/?name=Demo+User' }
+  ];
 
   const handleSelect = (user) => {
     setLoading(true);

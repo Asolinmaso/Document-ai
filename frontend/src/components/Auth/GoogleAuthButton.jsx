@@ -7,7 +7,7 @@ const GoogleAuthButton = ({ onSuccess, text = "signup_with" }) => {
     /* global google */
     if (window.google) {
       google.accounts.id.initialize({
-        client_id: "337074822738-kaucna6a1olvoo8qfvs8r320iekp9hi1.apps.googleusercontent.com", // Real Client ID from Stafio project
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || "337074822738-kaucna6a1olvoo8qfvs8r320iekp9hi1.apps.googleusercontent.com",
         callback: (response) => {
           console.log("Google Auth Success", response);
           onSuccess(response);
