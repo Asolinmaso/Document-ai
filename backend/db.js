@@ -15,14 +15,19 @@ const dbName = process.env.PGDATABASE || 'mabs_db';
 // Ensure the database exists by connecting to default 'postgres' first
 async function ensureDatabaseExists() {
   const { Client } = pg;
-  const clientConfig = {
-    user: process.env.PGUSER || 'postgres',
-    password: process.env.PGPASSWORD || 'postgres',
-    host: process.env.PGHOST || 'localhost',
-    port: parseInt(process.env.PGPORT || '5432'),
-    database: 'postgres',
-    ssl: process.env.PGHOST && process.env.PGHOST !== 'localhost' ? { rejectUnauthorized: false } : false
-  };
+  const clientConfig = process.env.DATABASE_URL 
+    ? { 
+        connectionString: process.env.DATABASE_URL.trim(),
+        ssl: { rejectUnauthorized: false }
+      }
+    : {
+        user: (process.env.PGUSER || 'postgres').trim(),
+        password: (process.env.PGPASSWORD || 'postgres').trim(),
+        host: (process.env.PGHOST || 'localhost').trim(),
+        port: parseInt(process.env.PGPORT || '5432'),
+        database: 'postgres', // Note: this will likely fail on managed DBs if using DATABASE_URL, handled by try/catch
+        ssl: process.env.PGHOST && process.env.PGHOST !== 'localhost' ? { rejectUnauthorized: false } : false
+      };
 
   const client = new Client(clientConfig);
   try {
@@ -44,15 +49,19 @@ async function ensureDatabaseExists() {
   }
 }
 
-// Main connection pool
-const pool = new pg.Pool({
-  user: process.env.PGUSER || 'postgres',
-  password: process.env.PGPASSWORD || 'postgres',
-  host: process.env.PGHOST || 'localhost',
-  port: parseInt(process.env.PGPORT || '5432'),
-  database: dbName,
-  ssl: process.env.PGHOST && process.env.PGHOST !== 'localhost' ? { rejectUnauthorized: false } : false
-});
+const pool = process.env.DATABASE_URL 
+  ? new pg.Pool({
+      connectionString: process.env.DATABASE_URL.trim(),
+      ssl: { rejectUnauthorized: false }
+    })
+  : new pg.Pool({
+      user: (process.env.PGUSER || 'postgres').trim(),
+      password: (process.env.PGPASSWORD || 'postgres').trim(),
+      host: (process.env.PGHOST || 'localhost').trim(),
+      port: parseInt(process.env.PGPORT || '5432'),
+      database: (process.env.PGDATABASE || 'mabs_db').trim(),
+      ssl: process.env.PGHOST && process.env.PGHOST !== 'localhost' ? { rejectUnauthorized: false } : false
+    });
 
 // Automatic migration script from db.json
 async function migrateDataFromJSON(client) {
