@@ -1,10 +1,7 @@
-import { apiFetch } from './api';
+import api from './api';
 
 export const login = async (email, password) => {
-  const data = await apiFetch('/auth/login', {
-    method: 'POST',
-    body: { email, password },
-  });
+  const data = await api.post('/auth/login', { email, password });
   
   if (data.token) {
     localStorage.setItem('token', data.token);
@@ -15,16 +12,11 @@ export const login = async (email, password) => {
 };
 
 export const signup = async (name, email, password) => {
-  return await apiFetch('/auth/signup', {
-    method: 'POST',
-    body: { name, email, password },
-  });
+  return await api.post('/auth/signup', { name, email, password });
 };
 
 export const getMe = async () => {
-  return await apiFetch('/auth/me', {
-    method: 'GET',
-  });
+  return await api.get('/auth/me');
 };
 
 export const logout = () => {

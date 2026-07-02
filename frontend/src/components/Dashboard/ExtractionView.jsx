@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Upload, FileText, CheckCircle, Loader } from 'lucide-react';
-import { apiFetch } from '../../services/api';
+import api from '../../services/api';
 
 const ExtractionView = () => {
   const [file, setFile] = useState(null);
@@ -29,10 +29,7 @@ const ExtractionView = () => {
       const formData = new FormData();
       formData.append('document', file);
 
-      const res = await apiFetch('/extract', {
-        method: 'POST',
-        body: formData,
-      });
+      const res = await api.post('/extract', formData);
 
       if (res && res.extracted_data) {
         setResult(res.extracted_data);

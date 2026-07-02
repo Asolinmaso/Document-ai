@@ -1,46 +1,38 @@
-const BASE_URL = '/api';
+import axios from 'axios';
 
-export const apiFetch = async (endpoint, options = {}) => {
-  const token = localStorage.getItem('token');
-  
-  const headers = {
-    ...options.headers,
-  };
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || '/api',
+});
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  // If we are passing FormData, don't set Content-Type to application/json
-  // Let the browser set it with the correct boundary
-  if (!(options.body instanceof FormData)) {
-    if (!headers['Content-Type']) {
-      headers['Content-Type'] = 'application/json';
+// Request interceptor to add the auth token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
-    if (options.body && typeof options.body === 'object') {
-      options.body = JSON.stringify(options.body);
-    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
   }
+);
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
-
-  if (!response.ok) {
+// Response interceptor for error handling
+api.interceptors.response.use(
+  (response) => {
+    // Return the response data directly
+    return response.data;
+  },
+  (error) => {
     let errorMsg = 'An error occurred';
-    try {
-      const errorData = await response.json();
-      errorMsg = errorData.error || errorMsg;
-    } catch (e) {
-      errorMsg = response.statusText;
+    if (error.response && error.response.data) {
+      errorMsg = error.response.data.error || error.response.data.message || errorMsg;
+    } else if (error.message) {
+      errorMsg = error.message;
     }
-    throw new Error(errorMsg);
+    return Promise.reject(new Error(errorMsg));
   }
+);
 
-  const contentType = response.headers.get('content-type');
-  if (contentType && contentType.includes('application/json')) {
-    return response.json();
-  }
-  return response.text();
-};
+export default api;
