@@ -2,15 +2,23 @@ import React, { useEffect, useRef } from 'react';
 
 const GoogleAuthButton = ({ onSuccess, text = "signup_with" }) => {
   const buttonRef = useRef(null);
+  const initialized = useRef(false);
+  const onSuccessRef = useRef(onSuccess);
+
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+  }, [onSuccess]);
 
   useEffect(() => {
     /* global google */
-    if (window.google) {
+    if (window.google && !initialized.current) {
       google.accounts.id.initialize({
         client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || "337074822738-kaucna6a1olvoo8qfvs8r320iekp9hi1.apps.googleusercontent.com",
         callback: (response) => {
           console.log("Google Auth Success", response);
-          onSuccess(response);
+          if (onSuccessRef.current) {
+            onSuccessRef.current(response);
+          }
         }
       });
 
@@ -26,10 +34,12 @@ const GoogleAuthButton = ({ onSuccess, text = "signup_with" }) => {
         }
       );
 
-      // Optional: Show One Tap prompt automatically
-      google.accounts.id.prompt();
+      // We comment out prompt() to avoid FedCM NotAllowedError and multiple outstanding request errors
+      // google.accounts.id.prompt();
+      
+      initialized.current = true;
     }
-  }, [onSuccess, text]);
+  }, [text]);
 
   return (
     <div style={{ width: '100%', display: 'flex', justifyContent: 'center', marginTop: '16px' }}>

@@ -91,7 +91,45 @@ const EditorView = ({ onBack, doc, logo }) => {
     return defaultVal;
   };
 
-  const [date, setDate] = useState(() => loadInitialState('date', ''));
+  // Returns today's date as "JUNE 19,2026" to match template header format
+  const getTodayFormatted = () => {
+    const now = new Date();
+    const month = now.toLocaleString('en-US', { month: 'long' }).toUpperCase();
+    const day = now.getDate();
+    const year = now.getFullYear();
+    return `${month} ${day},${year}`;
+  };
+
+  // Returns today in YYYY-MM-DD for the date picker input
+  const getTodayISO = () => {
+    const now = new Date();
+    return now.toISOString().split('T')[0];
+  };
+
+  // Convert YYYY-MM-DD → "JUNE 19,2026"
+  const formatDateForTemplate = (isoDate) => {
+    if (!isoDate) return '';
+    const d = new Date(isoDate + 'T00:00:00');
+    const month = d.toLocaleString('en-US', { month: 'long' }).toUpperCase();
+    const day = d.getDate();
+    const year = d.getFullYear();
+    return `${month} ${day},${year}`;
+  };
+
+  // Convert formatted date back to YYYY-MM-DD for the picker
+  const parseFormattedDate = (formatted) => {
+    try {
+      const d = new Date(formatted.replace(',', ' '));
+      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+    } catch (e) {}
+    return getTodayISO();
+  };
+
+  const [date, setDate] = useState(() => loadInitialState('date', getTodayFormatted()));
+  const [dateISO, setDateISO] = useState(() => {
+    const saved = loadInitialState('date', '');
+    return saved ? parseFormattedDate(saved) : getTodayISO();
+  });
   const [companyName, setCompanyName] = useState(() => loadInitialState('companyName', ''));
   const [totalRequirements, setTotalRequirements] = useState(() => loadInitialState('totalRequirements', ''));
   const [replacementGuarantee, setReplacementGuarantee] = useState(() => loadInitialState('replacementGuarantee', ''));
@@ -118,8 +156,9 @@ const EditorView = ({ onBack, doc, logo }) => {
   const [textColor, setTextColor] = useState(() => loadInitialState('textColor', '#111827'));
 
   // Save to localStorage whenever important state changes
+  // Note: we skip saving date if it's empty, so the auto-today default always applies on fresh open
   useEffect(() => {
-    const stateToSave = { date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
+    const stateToSave = { date: date || undefined, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
     localStorage.setItem('editorState', JSON.stringify(stateToSave));
   }, [date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
 
@@ -498,18 +537,48 @@ const EditorView = ({ onBack, doc, logo }) => {
         // Do NOT replace the detected company name (e.g. "MABS") globally.
         const replacements = [];
 
-        // Date placeholders only
+        // ── DATE PLACEHOLDERS ──────────────────────────────────────────────────
+        // Covers: xxx_date, XXX_DATE, [date], [DATE], date xxx, Date : XXXX, etc.
         if (date) {
+          // Explicit placeholder codes the template author puts in the PDF
+          replacements.push({ target: 'xxx_date', text: date });
+          replacements.push({ target: 'XXX_DATE', text: date });
+          replacements.push({ target: 'Xxx_date', text: date });
+          replacements.push({ target: '[date]', text: date });
+          replacements.push({ target: '[DATE]', text: date });
+          replacements.push({ target: '{{date}}', text: date });
+          replacements.push({ target: '{{DATE}}', text: date });
+          // Legacy / other formats
           replacements.push({ target: 'date xxx', text: date });
+          replacements.push({ target: 'DATE XXX', text: date });
           replacements.push({ target: 'Date : XXXX', text: `Date : ${date}` });
           replacements.push({ target: 'Date: XXXX', text: `Date: ${date}` });
+          replacements.push({ target: 'DATE : XXXX', text: `DATE : ${date}` });
+          replacements.push({ target: 'Date :XXXX', text: `Date :${date}` });
+          replacements.push({ target: 'Date : xxx', text: `Date : ${date}` });
+          replacements.push({ target: 'date : xxx', text: `Date : ${date}` });
         }
 
-        // Company placeholders only — replaces 'company xxx', 'To : XXXX', and 'XXXX[COMPANY'S NAME]'
+        // ── COMPANY NAME PLACEHOLDERS ──────────────────────────────────────────
+        // Covers: xxx_company, XXX_COMPANY, [company], To : XXXX, etc.
         if (companyName) {
-          replacements.push({ target: 'company xxx', text: companyName });
+          // Explicit placeholder codes
+          replacements.push({ target: 'xxx_company', text: companyName });
+          replacements.push({ target: 'XXX_COMPANY', text: companyName });
+          replacements.push({ target: 'Xxx_company', text: companyName });
+          replacements.push({ target: '[company]', text: companyName });
+          replacements.push({ target: '[COMPANY]', text: companyName });
+          replacements.push({ target: '{{company}}', text: companyName });
+          replacements.push({ target: '{{COMPANY}}', text: companyName });
+          // To : field variants
           replacements.push({ target: 'To : XXXX', text: `To : ${companyName}` });
           replacements.push({ target: 'To: XXXX', text: `To: ${companyName}` });
+          replacements.push({ target: 'TO : XXXX', text: `To : ${companyName}` });
+          replacements.push({ target: 'To : xxx', text: `To : ${companyName}` });
+          replacements.push({ target: 'to : xxx', text: `To : ${companyName}` });
+          replacements.push({ target: 'company xxx', text: companyName });
+          replacements.push({ target: 'COMPANY XXX', text: companyName });
+          // Named bracket variants
           replacements.push({ target: 'XXXX[Company Name]', text: companyName });
           replacements.push({ target: '[Company Name]', text: companyName });
           replacements.push({ target: "XXXX[COMPANY'S NAME]", text: companyName });
@@ -518,7 +587,7 @@ const EditorView = ({ onBack, doc, logo }) => {
           replacements.push({ target: "[Company's Name]", text: companyName });
         }
 
-        // Replacement Guarantee placeholders (XXmonth, XX month, etc.)
+        // ── REPLACEMENT GUARANTEE PLACEHOLDERS ────────────────────────────────
         if (replacementGuarantee) {
           let guaranteeText = replacementGuarantee.trim();
           // Auto-append "month"/"months" if only a number is provided
@@ -530,9 +599,11 @@ const EditorView = ({ onBack, doc, logo }) => {
           replacements.push({ target: 'XX month', text: guaranteeText });
           replacements.push({ target: 'XXmonths', text: guaranteeText });
           replacements.push({ target: 'XX months', text: guaranteeText });
+          replacements.push({ target: 'xxx_months', text: guaranteeText });
+          replacements.push({ target: '[months]', text: guaranteeText });
         }
 
-        // Service Fee Percentage placeholders (xx%, Rs . XX%)
+        // ── SERVICE FEE PERCENTAGE PLACEHOLDERS ────────────────────────────────
         if (serviceFee) {
           let feeText = serviceFee.trim();
           // Auto-append '%' if only a number (optionally with decimal) is provided
@@ -543,6 +614,9 @@ const EditorView = ({ onBack, doc, logo }) => {
           replacements.push({ target: 'xx %', text: feeText });
           replacements.push({ target: 'XX%', text: feeText });
           replacements.push({ target: 'XX %', text: feeText });
+          replacements.push({ target: 'xxx%', text: feeText });
+          replacements.push({ target: 'xxx_%', text: feeText });
+          replacements.push({ target: '[fee]', text: feeText });
           replacements.push({ target: 'Rs . XX%', text: `Rs . ${feeText}` });
           replacements.push({ target: 'Rs . XX %', text: `Rs . ${feeText}` });
         }
@@ -883,7 +957,26 @@ const EditorView = ({ onBack, doc, logo }) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <label style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>Date :</label>
-                  <input type="text" value={date} onChange={e => setDate(e.target.value)} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px' }} />
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      value={dateISO}
+                      onChange={e => {
+                        const iso = e.target.value;
+                        setDateISO(iso);
+                        setDate(formatDateForTemplate(iso));
+                      }}
+                      style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px', flex: 1 }}
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={date}
+                    onChange={e => setDate(e.target.value)}
+                    placeholder="e.g. JUNE 19,2026"
+                    title="Auto-filled from date picker above. You can also edit manually."
+                    style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid #E5E7EB', outline: 'none', fontSize: '11px', color: '#6C2BD9', fontWeight: '600', background: '#F5F3FF' }}
+                  />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <label style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>To :</label>
