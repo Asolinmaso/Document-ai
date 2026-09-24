@@ -1,15 +1,15 @@
-import React, { useState, useRef } from 'react';
-import { 
-  Camera, 
-  Upload, 
-  Save, 
-  Plus, 
-  Trash2, 
-  RefreshCcw, 
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Camera,
+  Upload,
+  Save,
+  Plus,
+  Trash2,
   Image as ImageIcon,
   PenTool,
   Stamp as StampIcon,
-  ShieldCheck
+  ShieldCheck,
+  Building2,
 } from 'lucide-react';
 
 const emptyFormState = {
@@ -26,245 +26,264 @@ const emptyFormState = {
   postalCode: '',
 };
 
-const ProfileView = ({ savedData, onUpdateProfile, companyLogos, onUpdateLogos }) => {
+const ProfileView = ({ savedData, onUpdateProfile, companyLogos = [], onUpdateLogos, showToast }) => {
   const [activeTab, setActiveTab] = useState('Company Information');
   const [activeAssetSubTab, setActiveAssetSubTab] = useState('Logos');
+  const [editData, setEditData] = useState({ ...emptyFormState });
+  const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
   const assetFileInputRef = useRef(null);
-  
-  const [editData, setEditData] = useState({ ...emptyFormState });
-  const [logoName, setLogoName] = useState('No File Chosen');
 
-  React.useEffect(() => {
+  // Sync form when savedData arrives or changes
+  useEffect(() => {
     if (savedData) {
-      setEditData(prev => ({ ...prev, ...savedData }));
+      setEditData({ ...emptyFormState, ...savedData });
     }
   }, [savedData]);
 
-  const handleInputChange = (field, value) => {
-    setEditData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleUploadClick = () => fileInputRef.current.click();
-  const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) setLogoName(e.target.files[0].name);
-  };
+  const handleInputChange = (field, value) =>
+    setEditData((prev) => ({ ...prev, [field]: value }));
 
   const handleSave = async () => {
+    setSaving(true);
     try {
       await onUpdateProfile({ ...editData });
-      alert('Profile Saved Successfully!');
-    } catch (error) {
-      console.error("Failed to save profile", error);
-      alert('Failed to save profile');
+      // showToast is called inside onUpdateProfile in Dashboard
+    } catch {
+      showToast?.('Failed to save profile. Please try again.', 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
-  // Asset Actions (with Base64 conversion for persistence)
-  const handleAddAssetClick = () => assetFileInputRef.current.click();
-  
+  // Logo / Asset management
+  const handleAddAssetClick = () => assetFileInputRef.current?.click();
+
   const handleAssetFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      
-      reader.onloadend = () => {
-        const newLogo = {
-          id: Date.now(),
-          name: file.name,
-          url: reader.result // Base64 string
-        };
-        onUpdateLogos([...companyLogos, newLogo]);
-        alert(`${activeAssetSubTab.slice(0, -1)} uploaded and saved permanently!`);
-      };
-      
-      reader.readAsDataURL(file);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      showToast?.('File size exceeds 2 MB limit.', 'error');
+      return;
     }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const newLogo = { id: Date.now(), name: file.name, url: reader.result };
+      onUpdateLogos([...companyLogos, newLogo]);
+    };
+    reader.readAsDataURL(file);
+    // Reset input so the same file can be re-selected
+    e.target.value = '';
   };
 
   const handleDeleteLogo = (id) => {
-    const updatedLogos = companyLogos.filter(logo => logo.id !== id);
-    onUpdateLogos(updatedLogos);
+    onUpdateLogos(companyLogos.filter((l) => l.id !== id));
   };
 
   const assetCategories = [
-    { name: 'Logos', icon: <ImageIcon size={18} color="#EF4444" /> },
-    { name: 'Signature', icon: <PenTool size={18} color="#22C55E" /> },
-    { name: 'Stamp', icon: <StampIcon size={18} color="#3B82F6" /> },
-    { name: 'Seal', icon: <ShieldCheck size={18} color="#EC4899" /> },
+    { name: 'Logos', icon: <ImageIcon size={16} color="#EF4444" /> },
+    { name: 'Signature', icon: <PenTool size={16} color="#22C55E" /> },
+    { name: 'Stamp', icon: <StampIcon size={16} color="#3B82F6" /> },
+    { name: 'Seal', icon: <ShieldCheck size={16} color="#EC4899" /> },
   ];
 
   const formFields = [
-    { label: 'Company Name', key: 'companyName' },
-    { label: 'Business Type', key: 'businessType' },
-    { label: 'Industry', key: 'industry' },
-    { label: 'Website', key: 'website' },
-    { label: 'Contact', key: 'contact' },
-    { label: 'Email', key: 'email' },
-    { label: 'Address', key: 'address' },
-    { label: 'City', key: 'city' },
-    { label: 'State', key: 'state' },
-    { label: 'Country', key: 'country' },
-    { label: 'Postal Code', key: 'postalCode' },
+    { label: 'Company Name', key: 'companyName', type: 'text', span: 1 },
+    { label: 'Business Type', key: 'businessType', type: 'text', span: 1 },
+    { label: 'Industry', key: 'industry', type: 'text', span: 1 },
+    { label: 'Website', key: 'website', type: 'url', span: 1 },
+    { label: 'Contact Number', key: 'contact', type: 'tel', span: 1 },
+    { label: 'Email Address', key: 'email', type: 'email', span: 1 },
+    { label: 'Address', key: 'address', type: 'text', span: 3 },
+    { label: 'City', key: 'city', type: 'text', span: 1 },
+    { label: 'State / Province', key: 'state', type: 'text', span: 1 },
+    { label: 'Country', key: 'country', type: 'text', span: 1 },
+    { label: 'Postal Code', key: 'postalCode', type: 'text', span: 1 },
   ];
+
+  const inputStyle = {
+    padding: '10px 14px',
+    borderRadius: '8px',
+    border: '1px solid #D1D5DB',
+    fontSize: '14px',
+    outline: 'none',
+    background: '#F9FAFB',
+    transition: 'all 0.2s',
+    width: '100%',
+    color: '#111827',
+  };
+
+  // Safe defaults when savedData is still loading
+  const displayName = savedData?.companyName || '—';
+  const displayType = savedData?.businessType || '';
+  const displayIndustry = savedData?.industry || '';
 
   return (
     <div className="dashboard-content" style={{ padding: '30px' }}>
-      <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} />
-      <input type="file" ref={assetFileInputRef} style={{ display: 'none' }} onChange={handleAssetFileChange} />
+      <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={handleAssetFileChange} />
+      <input type="file" ref={assetFileInputRef} style={{ display: 'none' }} accept="image/png,image/jpeg,image/jpg,image/svg+xml" onChange={handleAssetFileChange} />
 
-      {/* Profile Header Banner */}
-      <div style={{ 
-        background: '#F9FAFB', 
-        borderRadius: '24px', 
-        padding: '35px', 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '30px',
-        marginBottom: '40px',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.02)'
-      }}>
-        <div style={{ 
-          width: '120px', 
-          height: '120px', 
-          background: 'white', 
-          borderRadius: '50%', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-          position: 'relative'
-        }}>
-          <img src="/mabs-logo.png" alt="Profile" style={{ width: '70%', height: '70%', objectFit: 'contain' }} />
-          <div onClick={handleUploadClick} style={{ position: 'absolute', bottom: '5px', right: '5px', background: '#6C2BD9', color: 'white', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '3px solid white' }}>
-            <Camera size={16} />
+      {/* Profile Header */}
+      <div style={{ background: '#F9FAFB', borderRadius: '20px', padding: '28px 32px', display: 'flex', alignItems: 'center', gap: '24px', marginBottom: '32px', boxShadow: '0 2px 12px rgba(0,0,0,0.04)' }}>
+        <div style={{ width: '80px', height: '80px', background: 'white', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', position: 'relative', flexShrink: 0 }}>
+          {companyLogos[0] ? (
+            <img src={companyLogos[0].url} alt="Company logo" style={{ width: '70%', height: '70%', objectFit: 'contain' }} />
+          ) : (
+            <Building2 size={32} color="#D1D5DB" />
+          )}
+          <div
+            onClick={() => assetFileInputRef.current?.click()}
+            title="Upload logo"
+            style={{ position: 'absolute', bottom: '2px', right: '2px', background: '#6C2BD9', color: 'white', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '2px solid white' }}
+          >
+            <Camera size={12} />
           </div>
         </div>
 
-        <div style={{ textAlign: 'left' }}>
-          <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#111827', margin: '0 0 8px 0' }}>{savedData.companyName}</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <p style={{ margin: 0, fontSize: '14px', color: '#4B5563', fontWeight: '500' }}>{savedData.businessType}</p>
-            <p style={{ margin: 0, fontSize: '13px', color: '#6B7280' }}>{savedData.industry}</p>
-            <p style={{ margin: 0, fontSize: '13px', color: '#6B7280' }}>{savedData.contact}</p>
-            <p style={{ margin: 0, fontSize: '13px', color: '#6B7280' }}>{savedData.email}</p>
-            <p style={{ margin: 0, fontSize: '13px', color: '#6C2BD9', fontWeight: '500' }}>{savedData.website}</p>
-            <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#9CA3AF', lineHeight: '1.4', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {savedData.address}{savedData.city ? `, ${savedData.city}` : ''}{savedData.state ? `, ${savedData.state}` : ''}{savedData.country ? `, ${savedData.country}` : ''}{savedData.postalCode ? ` - ${savedData.postalCode}` : ''}
-            </p>
-          </div>
+        <div>
+          <h2 style={{ fontSize: '22px', fontWeight: '800', color: '#111827', margin: '0 0 4px 0' }}>
+            {displayName}
+          </h2>
+          {displayType && <p style={{ margin: '0 0 2px', fontSize: '13px', color: '#4B5563', fontWeight: '500' }}>{displayType}</p>}
+          {displayIndustry && <p style={{ margin: 0, fontSize: '12px', color: '#9CA3AF' }}>{displayIndustry}</p>}
+          {savedData?.email && <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#6B7280' }}>{savedData.email}</p>}
+          {savedData?.contact && <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#6B7280' }}>{savedData.contact}</p>}
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ marginBottom: '40px' }}>
-        <div style={{ display: 'flex', gap: '30px', marginBottom: '15px' }}>
-          {['Company Information', 'Assets'].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} style={{ background: 'none', border: 'none', fontSize: '16px', fontWeight: activeTab === tab ? '700' : '500', color: activeTab === tab ? '#111827' : '#9CA3AF', cursor: 'pointer', padding: '0 0 10px 0', position: 'relative' }}>
+      <div style={{ marginBottom: '32px' }}>
+        <div style={{ display: 'flex', gap: '24px', borderBottom: '2px solid #E5E7EB' }}>
+          {['Company Information', 'Assets'].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '14px',
+                fontWeight: activeTab === tab ? '700' : '500',
+                color: activeTab === tab ? '#6C2BD9' : '#6B7280',
+                cursor: 'pointer',
+                padding: '10px 0',
+                marginBottom: '-2px',
+                borderBottom: activeTab === tab ? '2px solid #6C2BD9' : '2px solid transparent',
+                transition: 'all 0.2s',
+              }}
+            >
               {tab}
-              {activeTab === tab && <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '3px', background: '#6C2BD9', borderRadius: '10px' }}></div>}
             </button>
           ))}
         </div>
-        <div style={{ height: '1.5px', background: '#111827', width: '100%' }}></div>
       </div>
 
       {activeTab === 'Company Information' ? (
         <>
-          {/* Form Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '25px 30px', marginBottom: '50px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px 24px', marginBottom: '40px' }}>
             {formFields.map((field, i) => (
-              <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>{field.label}</label>
-                <input type="text" value={editData[field.key]} onChange={(e) => handleInputChange(field.key, e.target.value)} style={{ padding: '12px 16px', borderRadius: '10px', border: '1px solid #D1D5DB', fontSize: '14px', outline: 'none', background: '#F9FAFB', transition: 'all 0.2s' }} onFocus={e => { e.target.style.borderColor = '#6C2BD9'; e.target.style.background = 'white'; }} onBlur={e => { e.target.style.borderColor = '#D1D5DB'; e.target.style.background = '#F9FAFB'; }} />
+              <div
+                key={i}
+                style={{ display: 'flex', flexDirection: 'column', gap: '6px', gridColumn: field.span === 3 ? '1 / -1' : undefined }}
+              >
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {field.label}
+                </label>
+                <input
+                  type={field.type}
+                  value={editData[field.key]}
+                  onChange={(e) => handleInputChange(field.key, e.target.value)}
+                  style={inputStyle}
+                  onFocus={(e) => { e.target.style.borderColor = '#6C2BD9'; e.target.style.background = 'white'; e.target.style.boxShadow = '0 0 0 3px rgba(108,43,217,0.1)'; }}
+                  onBlur={(e) => { e.target.style.borderColor = '#D1D5DB'; e.target.style.background = '#F9FAFB'; e.target.style.boxShadow = 'none'; }}
+                />
               </div>
             ))}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>Logo</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '4px', border: '1px solid #D1D5DB', borderRadius: '10px', background: 'white' }}>
-                <span style={{ flex: 1, padding: '0 12px', fontSize: '13px', color: logoName === 'No File Chosen' ? '#9CA3AF' : '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{logoName}</span>
-                <button onClick={handleUploadClick} style={{ background: '#F3F4F6', border: '1px solid #E5E7EB', padding: '8px 16px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', color: '#374151', cursor: 'pointer' }}><Upload size={14} /> Upload File</button>
-              </div>
-            </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <button onClick={handleSave} style={{ background: '#6C2BD9', color: 'white', padding: '14px 60px', borderRadius: '12px', fontSize: '16px', fontWeight: '700', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 10px 15px -3px rgba(108, 43, 217, 0.3)' }}><Save size={20} /> Save Changes</button>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{ background: saving ? '#A78BFA' : '#6C2BD9', color: 'white', padding: '12px 40px', borderRadius: '10px', fontSize: '14px', fontWeight: '600', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(108,43,217,0.25)', transition: 'all 0.2s' }}
+            >
+              <Save size={16} />
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
           </div>
         </>
       ) : (
-        /* Assets View */
-        <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: '40px' }}>
-          {/* Assets Sidebar */}
-          <div style={{ background: '#F9FAFB', borderRadius: '20px', padding: '24px', height: 'fit-content' }}>
-            <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#111827', marginBottom: '24px' }}>Assets</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {assetCategories.map(cat => (
-                <div 
-                  key={cat.name} 
+        <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: '24px' }}>
+          {/* Asset sidebar */}
+          <div style={{ background: '#F9FAFB', borderRadius: '16px', padding: '20px', height: 'fit-content' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: '700', color: '#374151', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Categories</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {assetCategories.map((cat) => (
+                <div
+                  key={cat.name}
                   onClick={() => setActiveAssetSubTab(cat.name)}
-                  style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '12px', 
-                    padding: '12px 16px', 
-                    borderRadius: '12px', 
-                    background: activeAssetSubTab === cat.name ? 'white' : 'transparent',
-                    boxShadow: activeAssetSubTab === cat.name ? '0 4px 10px rgba(0,0,0,0.04)' : 'none',
-                    cursor: 'pointer',
-                    color: activeAssetSubTab === cat.name ? '#111827' : '#6B7280',
-                    fontWeight: activeAssetSubTab === cat.name ? '700' : '500',
-                    transition: 'all 0.2s'
-                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', borderRadius: '10px', background: activeAssetSubTab === cat.name ? 'white' : 'transparent', boxShadow: activeAssetSubTab === cat.name ? '0 2px 8px rgba(0,0,0,0.06)' : 'none', cursor: 'pointer', color: activeAssetSubTab === cat.name ? '#111827' : '#6B7280', fontWeight: activeAssetSubTab === cat.name ? '600' : '400', fontSize: '13px', transition: 'all 0.15s' }}
                 >
                   {cat.icon}
-                  <span style={{ fontSize: '14px' }}>{cat.name}</span>
+                  <span>{cat.name}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Asset Content */}
-          <div style={{ background: '#F9FAFB', borderRadius: '20px', padding: '35px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+          {/* Asset content */}
+          <div style={{ background: '#F9FAFB', borderRadius: '16px', padding: '28px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <div>
-                <h3 style={{ fontSize: '22px', fontWeight: '700', color: '#111827', margin: 0 }}>{activeAssetSubTab}</h3>
-                <p style={{ fontSize: '13px', color: '#6B7280', marginTop: '4px' }}>Upload & manage all company {activeAssetSubTab.toLowerCase()}.</p>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: 0 }}>{activeAssetSubTab}</h3>
+                <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px' }}>Upload & manage company {activeAssetSubTab.toLowerCase()}</p>
               </div>
-              <button onClick={handleAddAssetClick} style={{ background: '#6C2BD9', color: 'white', padding: '10px 24px', borderRadius: '10px', fontSize: '14px', fontWeight: '600', border: 'none', cursor: 'pointer' }}>Add {activeAssetSubTab.slice(0, -1)}</button>
+              <button
+                onClick={handleAddAssetClick}
+                style={{ background: '#6C2BD9', color: 'white', padding: '9px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Plus size={14} /> Add {activeAssetSubTab.slice(0, -1)}
+              </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
-              {/* Dynamic Asset Cards (Restored from companyLogos) */}
-              {companyLogos.map(logo => (
-                <div key={logo.id} style={{ background: 'white', borderRadius: '16px', border: '1.5px solid #F3F4F6', overflow: 'hidden' }}>
-                  <div style={{ height: '140px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-                    <img src={logo.url} alt={logo.name} style={{ maxWidth: '80%', maxHeight: '100%', objectFit: 'contain' }} />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '16px' }}>
+              {companyLogos.map((logo) => (
+                <div key={logo.id} style={{ background: 'white', borderRadius: '12px', border: '1px solid #E5E7EB', overflow: 'hidden' }}>
+                  <div style={{ height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+                    <img src={logo.url} alt={logo.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
                   </div>
-                  <div style={{ background: '#F9FAFB', padding: '16px', borderTop: '1.5px solid #F3F4F6' }}>
-                    <p style={{ fontSize: '12px', fontWeight: '700', color: '#111827', marginBottom: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{logo.name}</p>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={handleAddAssetClick} style={{ flex: 1, padding: '8px', border: '1.5px solid #6C2BD9', color: '#6C2BD9', background: 'white', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>Replace</button>
-                      <button onClick={() => handleDeleteLogo(logo.id)} style={{ flex: 1, padding: '8px', border: '1.5px solid #EF4444', color: '#EF4444', background: 'white', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>Delete</button>
-                    </div>
+                  <div style={{ background: '#F9FAFB', padding: '12px', borderTop: '1px solid #E5E7EB' }}>
+                    <p style={{ fontSize: '11px', fontWeight: '600', color: '#374151', marginBottom: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={logo.name}>{logo.name}</p>
+                    <button
+                      onClick={() => handleDeleteLogo(logo.id)}
+                      style={{ width: '100%', padding: '6px', border: '1px solid #EF4444', color: '#EF4444', background: 'white', borderRadius: '6px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                    >
+                      <Trash2 size={12} /> Remove
+                    </button>
                   </div>
                 </div>
               ))}
 
-              {/* Add New Asset Card */}
-              <div 
+              {/* Add new card */}
+              <div
                 onClick={handleAddAssetClick}
-                style={{ background: 'white', borderRadius: '16px', border: '2px dashed #E5E7EB', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', cursor: 'pointer', height: '235px' }}
+                style={{ background: 'white', borderRadius: '12px', border: '2px dashed #D1D5DB', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', cursor: 'pointer', minHeight: '170px', transition: 'all 0.2s' }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#6C2BD9'; e.currentTarget.style.background = '#F5F3FF'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#D1D5DB'; e.currentTarget.style.background = 'white'; }}
               >
-                <div style={{ width: '40px', height: '40px', borderRadius: '50%', border: '2px solid #6C2BD9', color: '#6C2BD9', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-                  <Plus size={24} strokeWidth={3} />
+                <div style={{ width: '36px', height: '36px', borderRadius: '50%', border: '2px solid #6C2BD9', color: '#6C2BD9', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '10px' }}>
+                  <Plus size={20} />
                 </div>
-                <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827', margin: '0 0 4px 0' }}>Add New {activeAssetSubTab.slice(0, -1)}</p>
-                <p style={{ fontSize: '10px', color: '#9CA3AF', textAlign: 'center' }}>JPEG, JPG, PNG or SVG<br/>Max size 2MB</p>
+                <p style={{ fontSize: '12px', fontWeight: '600', color: '#374151', margin: '0 0 4px' }}>Add {activeAssetSubTab.slice(0, -1)}</p>
+                <p style={{ fontSize: '10px', color: '#9CA3AF', textAlign: 'center', margin: 0 }}>PNG, JPG, SVG — max 2 MB</p>
               </div>
             </div>
-            
-            {companyLogos.length === 0 && activeAssetSubTab === 'Logos' && (
-              <p style={{ textAlign: 'center', color: '#9CA3AF', marginTop: '40px', fontSize: '13px' }}>No logos uploaded yet. Click above to add your first logo.</p>
+
+            {companyLogos.length === 0 && (
+              <p style={{ textAlign: 'center', color: '#9CA3AF', fontSize: '13px', marginTop: '20px' }}>
+                No {activeAssetSubTab.toLowerCase()} uploaded yet.
+              </p>
             )}
           </div>
         </div>

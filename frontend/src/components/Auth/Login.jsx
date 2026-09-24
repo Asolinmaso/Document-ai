@@ -1,30 +1,27 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
-import GoogleAuthButton from './GoogleAuthButton';
+import { Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react';
 import { login } from '../../services/auth';
-import { useAuth } from '../../hooks/useAuth';
 
-const Login = ({ onSignupClick, onLoginSuccess }) => {
-  const { setUser } = useAuth();
-  const [showPassword, setShowPassword] = useState(false);
+const Login = ({ onSignupClick, onLoginSuccess, showToast }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
-    
+
+    if (!email.trim()) { setError('Please enter your email address.'); return; }
+    if (!password) { setError('Please enter your password.'); return; }
+
+    setLoading(true);
     try {
-      const data = await login(email, password);
-      if (data.token) {
-        setUser(data.user);
-        onLoginSuccess();
-      }
+      const data = await login(email.trim(), password);
+      onLoginSuccess(data.user);
     } catch (err) {
-      setError(err.message || 'Login failed');
+      setError(err.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -33,70 +30,143 @@ const Login = ({ onSignupClick, onLoginSuccess }) => {
   return (
     <div className="auth-container">
       <div className="auth-card glass">
-        <div className="auth-header" style={{ textAlign: 'center' }}>
-          <h1 style={{ fontSize: '32px' }}>Welcome Back!</h1>
-          <p>Log in to your account & continue creating amazing documents.</p>
-        </div>
-        
-        {error && <div style={{ color: '#EF4444', marginBottom: '16px', textAlign: 'center', fontSize: '14px' }}>{error}</div>}
-
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <input 
-              type="email" 
-              className="form-control" 
-              placeholder=" " 
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              required 
-            />
-            <label>Email</label>
+        {/* Brand */}
+        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '56px',
+            height: '56px',
+            borderRadius: '16px',
+            background: 'linear-gradient(135deg, #6C2BD9, #4F46E5)',
+            marginBottom: '16px',
+            boxShadow: '0 8px 20px rgba(108,43,217,0.4)',
+          }}>
+            <span style={{ fontSize: '24px' }}>📄</span>
           </div>
-          
+          <h1 style={{ fontSize: '28px', fontWeight: '700', marginBottom: '8px', letterSpacing: '-0.5px' }}>
+            Welcome back
+          </h1>
+          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '14px' }}>
+            Log in to your DocAI account
+          </p>
+        </div>
+
+        {/* Error banner */}
+        {error && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            background: 'rgba(239,68,68,0.12)',
+            border: '1px solid rgba(239,68,68,0.3)',
+            borderRadius: '10px',
+            padding: '12px 14px',
+            marginBottom: '20px',
+            fontSize: '13px',
+            color: '#FCA5A5',
+          }}>
+            <AlertCircle size={16} style={{ flexShrink: 0 }} />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} noValidate>
+          {/* Email */}
           <div className="form-group">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-              <a href="#" className="auth-link" style={{ fontSize: '13px', marginLeft: 'auto' }}>Forgot Password?</a>
+            <input
+              id="login-email"
+              type="email"
+              className="form-control"
+              placeholder=" "
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); setError(''); }}
+              autoComplete="email"
+              required
+            />
+            <label htmlFor="login-email">Email address</label>
+          </div>
+
+          {/* Password */}
+          <div className="form-group">
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
+              <button
+                type="button"
+                style={{ background: 'none', border: 'none', color: '#A78BFA', fontSize: '12px', cursor: 'pointer', padding: 0, fontWeight: '500' }}
+                onClick={() => showToast?.('Password reset is not yet available.', 'info')}
+              >
+                Forgot password?
+              </button>
             </div>
             <div className="input-wrapper">
-              <input 
-                type={showPassword ? "text" : "password"} 
-                className="form-control" 
-                placeholder=" " 
+              <input
+                id="login-password"
+                type={showPassword ? 'text' : 'password'}
+                className="form-control"
+                placeholder=" "
                 value={password}
-                onChange={e => setPassword(e.target.value)}
-                required 
+                onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                autoComplete="current-password"
+                required
               />
-              <label>Password</label>
-              <div 
-                onClick={() => setShowPassword(!showPassword)} 
-                style={{ position: 'absolute', right: '0', top: '8px', color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}
+              <label htmlFor="login-password">Password</label>
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                style={{
+                  position: 'absolute',
+                  right: '0',
+                  top: '6px',
+                  background: 'none',
+                  border: 'none',
+                  color: 'rgba(255,255,255,0.5)',
+                  cursor: 'pointer',
+                  padding: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
               >
-                {showPassword ? <Eye size={18} /> : <EyeOff size={18} />}
-              </div>
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
           </div>
-          
-          <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Logging in...' : 'Continue'}
+
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={loading}
+            style={{ marginTop: '24px', position: 'relative' }}
+          >
+            {loading ? (
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <span style={{
+                  width: '16px', height: '16px',
+                  border: '2px solid rgba(255,255,255,0.3)',
+                  borderTopColor: 'white',
+                  borderRadius: '50%',
+                  animation: 'spin 0.7s linear infinite',
+                  display: 'inline-block',
+                }} />
+                Signing in…
+              </span>
+            ) : 'Sign In'}
           </button>
-          
-          <div className="divider-container">
-            <div className="divider-line"></div>
-            <span className="divider-text">or continue with</span>
-            <div className="divider-line"></div>
-          </div>
-          
-          <GoogleAuthButton onSuccess={(res) => {
-            // Future: send Google token to backend to verify and issue local JWT
-            // For now we just bypass on UI layer, but ideally backend processes `res.credential`
-            onLoginSuccess();
-          }} text="signin_with" />
         </form>
-        
-        <div className="auth-footer">
-          Don't have an account? <a href="#" className="auth-link" onClick={onSignupClick}>Sign Up</a>
+
+        <div className="auth-footer" style={{ marginTop: '24px' }}>
+          Don't have an account?{' '}
+          <a
+            href="#"
+            className="auth-link"
+            onClick={(e) => { e.preventDefault(); onSignupClick(); }}
+          >
+            Create account
+          </a>
         </div>
       </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };

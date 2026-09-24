@@ -5,9 +5,10 @@ const baseURL = rawBaseURL.endsWith('/api') ? rawBaseURL : `${rawBaseURL}/api`;
 
 const api = axios.create({
   baseURL,
+  timeout: 30000,
 });
 
-// Request interceptor to add the auth token
+// ── Request interceptor: attach auth token ──────────────────────────────────
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -16,25 +17,36 @@ api.interceptors.request.use(
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// Response interceptor for error handling
+// ── Response interceptor: normalise errors & handle 401 globally ────────────
 api.interceptors.response.use(
-  (response) => {
-    // Return the response data directly
-    return response.data;
-  },
+  (response) => response.data,
   (error) => {
-    let errorMsg = 'An error occurred';
-    if (error.response && error.response.data) {
-      errorMsg = error.response.data.error || error.response.data.message || errorMsg;
-    } else if (error.message) {
-      errorMsg = error.message;
+    if (error.response) {
+      const { status, data } = error.response;
+
+      // Session expired or invalid token – clear local storage
+      if (status === 401 || status === 403) {
+        const code = data?.code;
+        if (code === 'TOKEN_EXPIRED' || code === 'TOKEN_INVALID' || status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          // Fire a custom event so App can react without circular imports
+          window.dispatchEvent(new CustomEvent('auth:expired', { detail: { reason: data?.error } }));
+        }
+      }
+
+      const message = data?.error || data?.message || `Request failed with status ${status}`;
+      return Promise.reject(new Error(message));
     }
-    return Promise.reject(new Error(errorMsg));
+
+    if (error.code === 'ECONNABORTED') {
+      return Promise.reject(new Error('Request timed out. Please check your connection.'));
+    }
+
+    return Promise.reject(new Error(error.message || 'A network error occurred.'));
   }
 );
 
