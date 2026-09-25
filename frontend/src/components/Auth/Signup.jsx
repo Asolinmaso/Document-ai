@@ -1,15 +1,10 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff, Check, X, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { signup, login } from '../../services/auth';
+import { isValidEmail, isValidName, isPasswordValid } from '../../utils/passwordRules';
+import PasswordRequirements, { ValidationItem } from './PasswordRequirements';
 
-const ValidationItem = ({ label, isValid }) => (
-  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: isValid ? '#34D399' : 'rgba(255,255,255,0.4)' }}>
-    {isValid ? <Check size={12} /> : <X size={12} />}
-    <span>{label}</span>
-  </div>
-);
-
-const Signup = ({ onLoginClick, onSignupSuccess, showToast }) => {
+const Signup = ({ onLoginClick, onSignupSuccess }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,9 +15,6 @@ const Signup = ({ onLoginClick, onSignupSuccess, showToast }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const hasMinLength = password.length >= 8;
-  const hasUppercase = /[A-Z]/.test(password);
-  const hasSymbol = /[!@#$%^&*(),.?":{}|<>]/.test(password);
   const passwordsMatch = password && confirmPassword && password === confirmPassword;
 
   const handleSubmit = async (e) => {
@@ -30,8 +22,10 @@ const Signup = ({ onLoginClick, onSignupSuccess, showToast }) => {
     setError('');
 
     if (!name.trim()) { setError('Please enter your full name.'); return; }
+    if (!isValidName(name)) { setError('Your name must be between 2 and 100 characters.'); return; }
     if (!email.trim()) { setError('Please enter your email address.'); return; }
-    if (!hasMinLength || !hasUppercase || !hasSymbol) {
+    if (!isValidEmail(email)) { setError('Please enter a valid email address.'); return; }
+    if (!isPasswordValid(password)) {
       setError('Password does not meet all requirements.'); return;
     }
     if (!passwordsMatch) {
@@ -150,13 +144,7 @@ const Signup = ({ onLoginClick, onSignupSuccess, showToast }) => {
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
-            {(isPasswordFocused || password) && (
-              <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <ValidationItem label="At least 8 characters" isValid={hasMinLength} />
-                <ValidationItem label="At least 1 uppercase letter" isValid={hasUppercase} />
-                <ValidationItem label="At least 1 special character" isValid={hasSymbol} />
-              </div>
-            )}
+            {(isPasswordFocused || password) && <PasswordRequirements password={password} />}
           </div>
 
           <div className="form-group">

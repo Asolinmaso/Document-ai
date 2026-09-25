@@ -12,11 +12,27 @@ import Groq from 'groq-sdk';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import {
+  normalizeEmail,
+  normalizeName,
+  validatePassword,
+  generateResetToken,
+  hashToken,
+  isWellFormedToken,
+  sendPasswordResetEmail,
+  sendPasswordChangedEmail,
+} from './authHelpers.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5001;
+
+// Behind Render / Vercel / nginx the client IP arrives in X-Forwarded-For. Without this every user
+// shares the proxy's IP and the rate limiter below would throttle everyone together.
+// Override with TRUST_PROXY (number of proxy hops, or "false").
+const trustProxyEnv = process.env.TRUST_PROXY;
+app.set('trust proxy', trustProxyEnv !== undefined ? (trustProxyEnv === 'false' ? false : Number(trustProxyEnv) || trustProxyEnv) : (process.env.NODE_ENV === 'production' ? 1 : false));
 
 // --- MIDDLEWARE ---
 
@@ -44,11 +60,23 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static('uploads'));
 
-// Rate limiting – stricter on auth endpoints
-const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, standardHeaders: true, legacyHeaders: false });
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+// Rate limiting. Limits apply per route so that ordinary calls such as /auth/me (made on every page
+// load) are never counted against the strict login / signup / password-reset budgets.
+const limiter = ({ windowMs = 15 * 60 * 1000, max, message, ...rest }) =>
+  rateLimit({ windowMs, max, standardHeaders: true, legacyHeaders: false, message: { error: message }, ...rest });
+
+const TOO_MANY = 'Too many attempts. Please wait a few minutes and try again.';
+const apiLimiter = limiter({ max: 300, message: 'Too many requests. Please slow down and try again shortly.' });
+const loginLimiter = limiter({ max: 20, message: TOO_MANY, skipSuccessfulRequests: true }); // only failed logins count
+const signupLimiter = limiter({ max: 15, message: TOO_MANY });
+const forgotLimiter = limiter({ max: 5, message: TOO_MANY });
+const resetLimiter = limiter({ max: 10, message: TOO_MANY });
+
 app.use('/api/', apiLimiter);
-app.use('/api/auth/', authLimiter);
+app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/signup', signupLimiter);
+app.use('/api/auth/forgot-password', forgotLimiter);
+app.use('/api/auth/reset-password', resetLimiter);
 
 const upload = multer({
   dest: 'uploads/',
@@ -73,13 +101,29 @@ const authenticateToken = (req, res, next) => {
     return res.status(500).json({ error: 'Server configuration error.' });
   }
 
-  jwt.verify(token, secret, (err, user) => {
+  jwt.verify(token, secret, async (err, user) => {
     if (err) {
       if (err.name === 'TokenExpiredError') {
         return res.status(401).json({ error: 'Session expired. Please log in again.', code: 'TOKEN_EXPIRED' });
       }
       return res.status(403).json({ error: 'Invalid or malformed token. Please log in again.', code: 'TOKEN_INVALID' });
     }
+
+    try {
+      // The account must still exist, and the token must have been issued after the last password change
+      const account = await pool.query('SELECT password_changed_at FROM users WHERE id = $1', [user.id]);
+      if (account.rowCount === 0) {
+        return res.status(401).json({ error: 'Account no longer exists. Please log in again.', code: 'TOKEN_INVALID' });
+      }
+      const changedAt = account.rows[0].password_changed_at;
+      if (changedAt && user.iat < Math.floor(new Date(changedAt).getTime() / 1000)) {
+        return res.status(401).json({ error: 'Your password was changed. Please log in again.', code: 'TOKEN_INVALID' });
+      }
+    } catch (dbError) {
+      console.error('Auth check failed:', dbError);
+      return res.status(500).json({ error: 'Could not verify your session. Please try again.' });
+    }
+
     req.user = user;
     next();
   });
@@ -104,25 +148,31 @@ app.get('/api/health', async (req, res) => {
 
 // --- AUTHENTICATION ROUTES ---
 
+const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 12); // keeps login timing equal for unknown emails
+const RESET_TOKEN_MINUTES = 60;
+const RESET_COOLDOWN_SECONDS = 60;
+
+// Where the reset link should point: the frontend the request came from (if allowed), else FRONTEND_URL
+const frontendBaseFor = (req) => {
+  const origin = req.headers.origin && normalizeOrigin(req.headers.origin);
+  if (origin && (allowedOrigins.includes(origin) || (!isProduction && isLocalOrigin(origin)))) return origin;
+  return allowedOrigins[0];
+};
+
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password } = req.body || {};
 
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required.' });
-    if (!email || !email.trim()) return res.status(400).json({ error: 'Email is required.' });
-    if (!password) return res.status(400).json({ error: 'Password is required.' });
+    const cleanName = normalizeName(name);
+    if (!cleanName) return res.status(400).json({ error: 'Please enter your full name (2–100 characters).' });
 
-    // Basic email format validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Please provide a valid email address.' });
-    }
+    const cleanEmail = normalizeEmail(email);
+    if (!cleanEmail) return res.status(400).json({ error: 'Please provide a valid email address.' });
 
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
-    }
+    const passwordError = validatePassword(password);
+    if (passwordError) return res.status(400).json({ error: passwordError });
 
-    const userCheck = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+    const userCheck = await pool.query('SELECT id FROM users WHERE email = $1', [cleanEmail]);
     if (userCheck.rowCount > 0) {
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
@@ -130,11 +180,15 @@ app.post('/api/auth/signup', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 12);
     const result = await pool.query(
       'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, created_at',
-      [name.trim(), email.toLowerCase().trim(), hashedPassword]
+      [cleanName, cleanEmail, hashedPassword]
     );
 
     res.status(201).json({ message: 'Account created successfully.', user: result.rows[0] });
   } catch (error) {
+    // Two signups for the same email racing past the check above
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'An account with this email already exists.' });
+    }
     console.error('Signup error:', error);
     res.status(500).json({ error: 'Failed to create account. Please try again.' });
   }
@@ -142,19 +196,19 @@ app.post('/api/auth/signup', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
 
-    if (!email || !email.trim()) return res.status(400).json({ error: 'Email is required.' });
-    if (!password) return res.status(400).json({ error: 'Password is required.' });
+    if (typeof email !== 'string' || !email.trim()) return res.status(400).json({ error: 'Email is required.' });
+    if (typeof password !== 'string' || !password) return res.status(400).json({ error: 'Password is required.' });
+    const cleanEmail = normalizeEmail(email);
+    if (!cleanEmail) return res.status(400).json({ error: 'Please provide a valid email address.' });
 
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase().trim()]);
-    if (result.rowCount === 0) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
-    }
-
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [cleanEmail]);
     const user = result.rows[0];
-    const validPassword = await bcrypt.compare(password, user.password_hash);
-    if (!validPassword) {
+
+    // Always run a bcrypt comparison so response time doesn't reveal whether the email exists
+    const validPassword = await bcrypt.compare(password, user ? user.password_hash : DUMMY_HASH);
+    if (!user || !validPassword) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
@@ -177,6 +231,90 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Login failed. Please try again.' });
+  }
+});
+
+// Step 1 of "forgot password": email a single-use link. The response is identical whether or not the
+// account exists, so this endpoint can't be used to discover which emails are registered.
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const generic = { message: 'If an account exists for that email, a password reset link is on its way.' };
+  try {
+    const cleanEmail = normalizeEmail(req.body?.email);
+    if (!cleanEmail) return res.status(400).json({ error: 'Please provide a valid email address.' });
+
+    const found = await pool.query('SELECT id, name, email FROM users WHERE email = $1', [cleanEmail]);
+    if (found.rowCount > 0) {
+      const user = found.rows[0];
+
+      const recent = await pool.query(
+        `SELECT 1 FROM password_resets
+         WHERE user_id = $1 AND used_at IS NULL AND created_at > NOW() - make_interval(secs => $2)`,
+        [user.id, RESET_COOLDOWN_SECONDS]
+      );
+
+      if (recent.rowCount === 0) {
+        const token = generateResetToken();
+        await pool.query('DELETE FROM password_resets WHERE user_id = $1', [user.id]); // older links stop working
+        await pool.query(
+          `INSERT INTO password_resets (user_id, token_hash, expires_at)
+           VALUES ($1, $2, NOW() + make_interval(mins => $3))`,
+          [user.id, hashToken(token), RESET_TOKEN_MINUTES]
+        );
+
+        const link = `${frontendBaseFor(req)}/?reset_token=${token}`;
+        // Not awaited: sending takes a while and would make "account exists" observable through timing
+        sendPasswordResetEmail({ to: user.email, name: user.name, link, expiresInMinutes: RESET_TOKEN_MINUTES })
+          .catch((err) => console.error('Failed to send password reset email:', err.message));
+      }
+    }
+    res.json(generic);
+  } catch (error) {
+    console.error('Forgot-password error:', error);
+    res.status(500).json({ error: 'Could not process the request. Please try again.' });
+  }
+});
+
+// Step 2: set the new password using the emailed token
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { token, password } = req.body || {};
+  const invalidLink = { error: 'This reset link is invalid or has expired. Please request a new one.' };
+
+  if (!isWellFormedToken(token)) return res.status(400).json(invalidLink);
+  const passwordError = validatePassword(password);
+  if (passwordError) return res.status(400).json({ error: passwordError });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const found = await client.query(
+      `SELECT pr.user_id, u.name, u.email
+       FROM password_resets pr JOIN users u ON u.id = pr.user_id
+       WHERE pr.token_hash = $1 AND pr.used_at IS NULL AND pr.expires_at > NOW()
+       FOR UPDATE OF pr`,
+      [hashToken(token)]
+    );
+    if (found.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json(invalidLink);
+    }
+    const { user_id: userId, name, email } = found.rows[0];
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+    // password_changed_at signs out every session that was created before this moment
+    await client.query('UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2', [hashedPassword, userId]);
+    await client.query('DELETE FROM password_resets WHERE user_id = $1', [userId]);
+    await client.query('COMMIT');
+
+    sendPasswordChangedEmail({ to: email, name })
+      .catch((err) => console.error('Failed to send password-changed notice:', err.message));
+    res.json({ message: 'Your password has been reset. You can now log in with it.' });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Reset-password error:', error);
+    res.status(500).json({ error: 'Could not reset your password. Please try again.' });
+  } finally {
+    client.release();
   }
 });
 

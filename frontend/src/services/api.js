@@ -10,11 +10,14 @@ const api = axios.create({
   timeout: 30000,
 });
 
+// Endpoints that work without a session – never send a (possibly stale) token to them
+const PUBLIC_ENDPOINTS = /^\/auth\/(login|signup|forgot-password|reset-password)\/?$/;
+
 // ── Request interceptor: attach auth token ──────────────────────────────────
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
-    if (token) {
+    if (token && !PUBLIC_ENDPOINTS.test(config.url || '')) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
@@ -29,8 +32,11 @@ api.interceptors.response.use(
     if (error.response) {
       const { status, data } = error.response;
 
-      // Session expired or invalid token – clear local storage
-      if (status === 401 || status === 403) {
+      // Session expired or invalid token – clear local storage.
+      // Only when a token was sent: a wrong password on the login form is also a 401,
+      // but it must not show "session expired" or wipe anything.
+      const sentToken = Boolean(error.config?.headers?.Authorization);
+      if (sentToken && (status === 401 || status === 403)) {
         const code = data?.code;
         if (code === 'TOKEN_EXPIRED' || code === 'TOKEN_INVALID' || status === 401) {
           localStorage.removeItem('token');
@@ -46,6 +52,10 @@ api.interceptors.response.use(
 
     if (error.code === 'ECONNABORTED') {
       return Promise.reject(new Error('Request timed out. Please check your connection.'));
+    }
+
+    if (error.request) {
+      return Promise.reject(new Error('Cannot reach the server. Please check your connection and try again.'));
     }
 
     return Promise.reject(new Error(error.message || 'A network error occurred.'));

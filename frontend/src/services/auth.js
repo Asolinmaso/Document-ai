@@ -23,6 +23,21 @@ export const signup = async (name, email, password) => {
 };
 
 /**
+ * Ask the server to email a password-reset link. The response is the same whether or not the
+ * account exists, so callers must not imply that it does.
+ */
+export const forgotPassword = async (email) => {
+  return api.post('/auth/forgot-password', { email });
+};
+
+/**
+ * Set a new password using the token from the reset email.
+ */
+export const resetPassword = async (token, password) => {
+  return api.post('/auth/reset-password', { token, password });
+};
+
+/**
  * Fetch current authenticated user from the server.
  * Throws if the token is invalid / expired.
  */

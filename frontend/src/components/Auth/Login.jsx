@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react';
 import { login } from '../../services/auth';
+import { isValidEmail } from '../../utils/passwordRules';
 
-const Login = ({ onSignupClick, onLoginSuccess, showToast }) => {
+const Login = ({ onSignupClick, onForgotClick, onLoginSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -14,6 +15,7 @@ const Login = ({ onSignupClick, onLoginSuccess, showToast }) => {
     setError('');
 
     if (!email.trim()) { setError('Please enter your email address.'); return; }
+    if (!isValidEmail(email)) { setError('Please enter a valid email address.'); return; }
     if (!password) { setError('Please enter your password.'); return; }
 
     setLoading(true);
@@ -94,7 +96,7 @@ const Login = ({ onSignupClick, onLoginSuccess, showToast }) => {
               <button
                 type="button"
                 style={{ background: 'none', border: 'none', color: '#A78BFA', fontSize: '12px', cursor: 'pointer', padding: 0, fontWeight: '500' }}
-                onClick={() => showToast?.('Password reset is not yet available.', 'info')}
+                onClick={() => onForgotClick(email.trim())}
               >
                 Forgot password?
               </button>

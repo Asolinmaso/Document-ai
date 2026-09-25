@@ -242,6 +242,21 @@ export async function initSchema() {
       )
     `);
 
+    // Sessions issued before this moment are rejected (set when a password is reset)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ`);
+
+    // Password reset tokens – only the SHA-256 hash of the emailed token is stored
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash VARCHAR(64) NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        used_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     // 6. Extractions table
     await client.query(`
       CREATE TABLE IF NOT EXISTS extractions (
