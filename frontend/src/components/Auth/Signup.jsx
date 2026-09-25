@@ -33,14 +33,22 @@ const Signup = ({ onLoginClick, onSignupSuccess }) => {
     }
 
     setLoading(true);
+    let created = false;
     try {
       // 1. Create the account
       await signup(name.trim(), email.trim(), password);
+      created = true;
       // 2. Immediately log in so we get the token & user
       const data = await login(email.trim(), password);
       onSignupSuccess(data.user);
     } catch (err) {
-      setError(err.message || 'Signup failed. Please try again.');
+      if (created) {
+        // The account exists; only the automatic sign-in failed, so don't tell the user signup failed
+        setError('Your account was created, but we could not sign you in automatically. Please log in.');
+        setTimeout(onLoginClick, 2500);
+      } else {
+        setError(err.message || 'Signup failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

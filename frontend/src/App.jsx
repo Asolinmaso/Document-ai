@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Signup from './components/Auth/Signup';
 import Login from './components/Auth/Login';
+import ForgotPassword from './components/Auth/ForgotPassword';
+import ResetPassword from './components/Auth/ResetPassword';
 import Dashboard from './components/Dashboard/Dashboard';
 import ToastContainer from './components/ToastContainer';
 import { useAuth } from './hooks/useAuth';
@@ -13,13 +15,24 @@ function App() {
   // Derive the initial view: if the user is already authenticated, go straight
   // to the dashboard; otherwise start at login.
   const [view, setView] = useState('login');
+  // Email typed on the login form, carried over to "Forgot password"
+  const [forgotEmail, setForgotEmail] = useState('');
 
-  // When auth state resolves, navigate accordingly
+  // The password-reset email links to  <site>/?reset_token=...  – read it once, then clean the URL
+  // so the token doesn't linger in the address bar, history or referrers.
+  const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get('reset_token'));
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('reset_token')) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  // When auth state resolves, navigate accordingly (a reset link always wins)
   useEffect(() => {
     if (!loading) {
-      setView(user ? 'dashboard' : 'login');
+      setView(resetToken ? 'reset' : user ? 'dashboard' : 'login');
     }
-  }, [user, loading]);
+  }, [user, loading, resetToken]);
 
   // Show an in-app message when a session expires
   useEffect(() => {
@@ -68,6 +81,14 @@ function App() {
     showToast(`Account created! Welcome, ${newUser?.name || 'User'}!`, 'success');
   };
 
+  const handleResetSuccess = () => {
+    // Resetting signs out every older session; drop any local one too
+    logout();
+    setResetToken(null);
+    setView('login');
+    showToast('Password reset! Please log in with your new password.', 'success', 5000);
+  };
+
   const handleLogout = () => {
     logout();
     setView('login');
@@ -81,15 +102,30 @@ function App() {
           <Signup
             onLoginClick={() => setView('login')}
             onSignupSuccess={handleSignupSuccess}
-            showToast={showToast}
           />
         );
       case 'login':
         return (
           <Login
             onSignupClick={() => setView('signup')}
+            onForgotClick={(email) => { setForgotEmail(email); setView('forgot'); }}
             onLoginSuccess={handleLoginSuccess}
-            showToast={showToast}
+          />
+        );
+      case 'forgot':
+        return (
+          <ForgotPassword
+            initialEmail={forgotEmail}
+            onBackToLogin={() => setView('login')}
+          />
+        );
+      case 'reset':
+        return (
+          <ResetPassword
+            token={resetToken}
+            onSuccess={handleResetSuccess}
+            onRequestNewLink={() => { setResetToken(null); setForgotEmail(''); setView('forgot'); }}
+            onBackToLogin={() => { setResetToken(null); setView('login'); }}
           />
         );
       case 'dashboard':
@@ -104,8 +140,8 @@ function App() {
         return (
           <Login
             onSignupClick={() => setView('signup')}
+            onForgotClick={(email) => { setForgotEmail(email); setView('forgot'); }}
             onLoginSuccess={handleLoginSuccess}
-            showToast={showToast}
           />
         );
     }
