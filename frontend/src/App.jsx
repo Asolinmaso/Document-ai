@@ -30,7 +30,13 @@ function App() {
   // When auth state resolves, navigate accordingly (a reset link always wins)
   useEffect(() => {
     if (!loading) {
-      setView(resetToken ? 'reset' : user ? 'dashboard' : 'login');
+      setView((current) => {
+        if (resetToken) return 'reset';
+        if (user) return 'dashboard';
+        // Logged out: keep the public screen the user is on (login / signup / forgot);
+        // only leave the screens that need a session or a reset token.
+        return current === 'dashboard' || current === 'reset' ? 'login' : current;
+      });
     }
   }, [user, loading, resetToken]);
 
