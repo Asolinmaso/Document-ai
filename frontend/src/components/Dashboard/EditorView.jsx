@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+import { analyzeTemplate, fillQuotation } from '../../utils/quotationEngine';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 import {
   ArrowLeft,
@@ -80,9 +80,12 @@ const EditorView = ({ onBack, doc, logo }) => {
   const docType = doc ? doc.type : "Quotation";
   const fileData = doc ? doc.file : null;
 
+  // Saved per document, so one quotation's client / positions never leak into the next one
+  const storageKey = `editorState:${doc?.id ?? 'default'}`;
+
   const loadInitialState = (key, defaultVal) => {
     try {
-      const saved = localStorage.getItem('editorState');
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed[key] !== undefined) return parsed[key];
@@ -159,189 +162,31 @@ const EditorView = ({ onBack, doc, logo }) => {
   // Note: we skip saving date if it's empty, so the auto-today default always applies on fresh open
   useEffect(() => {
     const stateToSave = { date: date || undefined, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
-    localStorage.setItem('editorState', JSON.stringify(stateToSave));
-  }, [date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
+    try { localStorage.setItem(storageKey, JSON.stringify(stateToSave)); } catch { /* storage full or blocked */ }
+  }, [storageKey, date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
 
-  // Smart Multi-Page State
-  const [elementsPos, setElementsPos] = useState({
-    date: [{ page: 1, x: 530, y: 150 }],
-    company: [{ page: 1, x: 530, y: 170 }],
-    totalReq: [{ page: 1, x: 60, y: 420 }],
-    table: [{ page: 1, x: 60, y: 460 }]
-  });
+  // Template analysis: text lines, table grid and banner colour are measured once per uploaded PDF
+  const [analysis, setAnalysis] = useState(null);
+  const [fillWarnings, setFillWarnings] = useState([]);
 
-  // Semantic AI Replace State
-  const [detectedCompanyName, setDetectedCompanyName] = useState('');
-  const [pdfLines, setPdfLines] = useState([]);
-  const [dragInfo, setDragInfo] = useState({ id: null, offsetX: 0, offsetY: 0, canvasLeft: 0, canvasTop: 0 });
-
-  // Smart Keyword Scanner: Auto-detect "Date" and "To" coordinates
   useEffect(() => {
     if (!fileData) return;
-
-    const autoDetectFields = async () => {
+    let cancelled = false;
+    (async () => {
       try {
         const base64Data = fileData.split(',')[1] || fileData;
         const pdfBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-
-        const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
-        const pdf = await loadingTask.promise;
-        const page = await pdf.getPage(1);
-        const textContent = await page.getTextContent();
-        let newDatePos = [];
-        let newCompanyPos = [];
-        let newTablePos = [];
-        let newTotalReqPos = [];
-        let extractedDate = null;
-        let extractedCompany = null;
-
-        const HTML_WIDTH = 794;
-        const HTML_HEIGHT = 1123;
-
-        let allItems = [];
-
-        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-          const page = await pdf.getPage(pageNum);
-          const textContent = await page.getTextContent();
-
-          const viewport = page.getViewport({ scale: 1.0 });
-          const scaleX = HTML_WIDTH / viewport.width;
-          const scaleY = HTML_HEIGHT / viewport.height;
-
-          const items = textContent.items.sort((a, b) => {
-            if (Math.abs(a.transform[5] - b.transform[5]) > 5) return b.transform[5] - a.transform[5];
-            return a.transform[4] - b.transform[4];
-          }).map(item => ({ ...item, pageNum, scaleX, scaleY }));
-
-          allItems = allItems.concat(items);
-
-          for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (!item.str) continue;
-            const str = item.str.trim().toLowerCase();
-            const tx = item.transform[4];
-            const ty = item.transform[5];
-            const itemX = tx * scaleX;
-            const itemY = HTML_HEIGHT - (ty * scaleY) - (item.height * scaleY);
-
-            if (str.includes('[date]') || str.includes('xxx_date')) {
-              newDatePos.push({ page: pageNum, x: itemX, y: itemY });
-            } else if (str.includes('date :') || str === 'date:') {
-              newDatePos.push({ page: pageNum, x: itemX + (item.width * scaleX) + 15, y: itemY });
-              if (i + 1 < items.length) {
-                const nextItem = items[i + 1];
-                if (Math.abs(nextItem.transform[5] - ty) < 10 && nextItem.transform[4] > tx && nextItem.str.trim()) {
-                  const val = nextItem.str.trim();
-                  if (!extractedDate && val !== 'xxx' && !val.includes('xxx')) extractedDate = val;
-                }
-              }
-            }
-
-            if (str.includes('[company]') || str.includes('xxx_company') || str === 'xxx') {
-              newCompanyPos.push({ page: pageNum, x: itemX, y: itemY });
-            } else if (str.includes('to :') || str === 'to:') {
-              newCompanyPos.push({ page: pageNum, x: itemX + (item.width * scaleX) + 15, y: itemY });
-              if (i + 1 < items.length) {
-                const nextItem = items[i + 1];
-                if (Math.abs(nextItem.transform[5] - ty) < 10 && nextItem.transform[4] > tx && nextItem.str.trim()) {
-                  const val = nextItem.str.trim();
-                  if (!extractedCompany && val !== 'xxx' && !val.includes('xxx')) extractedCompany = val;
-                }
-              }
-            }
-
-            if (str.includes('position requirements')) {
-              newTablePos.push({ page: pageNum, x: itemX, y: itemY });
-              newTotalReqPos.push({ page: pageNum, x: itemX, y: itemY - 40 });
-            }
-          }
-        }
-
-        // Build lines for robust text replacement
-        let allLines = [];
-        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-          const pageItems = allItems.filter(i => i.pageNum === pageNum);
-          const lines = [];
-          pageItems.forEach(item => {
-            if (!item.str.trim()) return;
-            const ty = Math.round(item.transform[5]);
-            const existingLine = lines.find(l => Math.abs(l.y - ty) < 5);
-            if (existingLine) {
-              existingLine.items.push(item);
-              existingLine.items.sort((a, b) => a.transform[4] - b.transform[4]);
-              // Reconstruct string by joining with spaces or just concatenating based on distance
-              // To be safe, we join with spaces because PDFjs sometimes splits words.
-              existingLine.str = existingLine.items.map(i => i.str).join(" ");
-              // Update bounding box
-              existingLine.minX = Math.min(existingLine.minX, item.transform[4]);
-              existingLine.maxX = Math.max(existingLine.maxX, item.transform[4] + item.width);
-              existingLine.height = Math.max(existingLine.height, item.height);
-            } else {
-              lines.push({
-                y: ty,
-                page: pageNum,
-                items: [item],
-                str: item.str,
-                minX: item.transform[4],
-                maxX: item.transform[4] + item.width,
-                height: item.height
-              });
-            }
-          });
-          allLines = allLines.concat(lines);
-        }
-
-        setPdfLines(allLines);
-
-        // Semantic AI Analysis to find Original Company Name
-        let detectedOrg = "";
-        for (let i = 0; i < allLines.length; i++) {
-          const str = allLines[i].str;
-          if (str.includes("services to ") && str.includes(" We appreciate")) {
-            const match = str.match(/services to (.*?) We appreciate/);
-            if (match && match[1]) {
-              detectedOrg = match[1].trim();
-              break;
-            }
-          } else if (str.includes("ABOUT ")) {
-            const match = str.match(/ABOUT ([A-Z ]+)/);
-            if (match && match[1]) {
-              detectedOrg = match[1].trim();
-              break;
-            }
-          }
-        }
-
-        if (detectedOrg && detectedOrg.length > 2) {
-          setDetectedCompanyName(detectedOrg);
-        }
-
-        setElementsPos(prev => ({
-          ...prev,
-          date: newDatePos.length > 0 ? newDatePos : [{ page: 1, x: 530, y: 150 }],
-          company: newCompanyPos.length > 0 ? newCompanyPos : [{ page: 1, x: 530, y: 170 }],
-          table: newTablePos.length > 0 ? newTablePos : [{ page: 1, x: 60, y: 460 }],
-          totalReq: newTotalReqPos.length > 0 ? newTotalReqPos : [{ page: 1, x: 60, y: 420 }]
-        }));
-
-        if (extractedDate && !date) setDate(extractedDate);
-        if (extractedCompany && !companyName) setCompanyName(extractedCompany);
+        const result = await analyzeTemplate(pdfjsLib, pdfBytes);
+        if (cancelled) return;
+        setAnalysis(result);
+        if (result.extracted.date && !date) setDate(result.extracted.date);
+        if (result.extracted.company && !companyName) setCompanyName(result.extracted.company);
       } catch (err) {
-        console.error("Smart Keyword Scanner Failed:", err);
+        console.error('Template analysis failed:', err);
       }
-    };
-
-    autoDetectFields();
+    })();
+    return () => { cancelled = true; };
   }, [fileData]);
-
-  // Live PDF Generation trigger
-  useEffect(() => {
-    if (!fileData || !elementsPos.date || elementsPos.date.length === 0) return;
-    const timer = setTimeout(() => {
-      handlePreview();
-    }, 300); // Reduced debounce to 300ms for near-instant rendering on canvas
-    return () => clearTimeout(timer);
-  }, [date, companyName, detectedCompanyName, totalRequirements, replacementGuarantee, serviceFee, positions, textColor, fontSize, fontFamily, elementsPos]);
 
   // Preview State
   const [previewPdfData, setPreviewPdfData] = useState(null);
@@ -386,387 +231,36 @@ const EditorView = ({ onBack, doc, logo }) => {
     return window.btoa(binary);
   };
 
-  const handlePreview = async () => {
-    if (!fileData) {
-      alert("No document uploaded!");
-      return;
-    }
+  const generatePreview = async () => {
+    if (!fileData || !analysis) return;
+    const myRun = ++runId.current;
 
     try {
       const base64Data = fileData.split(',')[1] || fileData;
       const pdfBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
 
-      const pdfDoc = await PDFDocument.load(pdfBytes);
+      const { bytes, warnings } = await fillQuotation(
+        pdfBytes,
+        analysis,
+        { date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions },
+        { fontFamily, isBold, isItalic, textColor }
+      );
+      if (myRun !== runId.current) return; // a newer edit superseded this run
 
-      let selectedFont = StandardFonts.Helvetica;
-      if (fontFamily === 'Times New Roman') {
-        if (isBold && isItalic) selectedFont = StandardFonts.TimesRomanBoldItalic;
-        else if (isBold) selectedFont = StandardFonts.TimesRomanBold;
-        else if (isItalic) selectedFont = StandardFonts.TimesRomanItalic;
-        else selectedFont = StandardFonts.TimesRoman;
-      } else {
-        if (isBold && isItalic) selectedFont = StandardFonts.HelveticaBoldOblique;
-        else if (isBold) selectedFont = StandardFonts.HelveticaBold;
-        else if (isItalic) selectedFont = StandardFonts.HelveticaOblique;
-      }
-
-      const helveticaFont = await pdfDoc.embedFont(selectedFont);
-      const fallbackBoldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      const fallbackRegularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const pages = pdfDoc.getPages();
-
-      const HTML_WIDTH = 794;
-      const HTML_HEIGHT = 1123;
-
-      const hexToRgb = (hex) => {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? { r: parseInt(result[1], 16) / 255, g: parseInt(result[2], 16) / 255, b: parseInt(result[3], 16) / 255 } : { r: 1, g: 1, b: 1 };
-      };
-      const textColorRgb = hexToRgb(textColor);
-
-      for (let pageNum = 1; pageNum <= pdfDoc.getPageCount(); pageNum++) {
-        const page = pages[pageNum - 1];
-        const { width, height } = page.getSize();
-        const scaleX = width / HTML_WIDTH;
-        const scaleY = height / HTML_HEIGHT;
-
-        // Date and Company name are now handled automatically by the Semantic Find and Replace engine!
-        const reqVal = parseInt(totalRequirements || '0', 10);
-        const totalRowsCount = Math.max(positions.length, reqVal);
-        const numDynamicRows = Math.max(0, totalRowsCount - 4);
-
-        if (totalRowsCount > 0) {
-          const tablePosArray = elementsPos.table.filter(p => p.page === pageNum);
-          tablePosArray.forEach(tPos => {
-            const noteLine = pdfLines.find(l => l.page === pageNum && l.str.toLowerCase().includes('note: the requirement'));
-            let nextRowTopY = height - (tPos.y * scaleY) - 180 * scaleY; // fallback
-            let baseBottomY = noteLine ? noteLine.y + 32 : nextRowTopY;
-
-            if (noteLine) {
-              if (numDynamicRows > 0) {
-                page.drawRectangle({
-                  x: noteLine.minX,
-                  y: noteLine.y - 5,
-                  width: noteLine.maxX - noteLine.minX + 20,
-                  height: noteLine.height + 10,
-                  color: rgb(1, 1, 1)
-                });
-              }
-            }
-
-            // --- Clean borderless row rendering (no box/line borders) ---
-            const startX = 48 * scaleX;
-            const rowHeightPDF = 35 * scaleY;
-
-            for (let index = 0; index < totalRowsCount; index++) {
-              const pos = positions[index] || { role: '', positions: '', qualifications: '', package: '' };
-
-              let textY;
-
-              if (index < 4) {
-                // Fill existing pre-drawn template rows (each ~47.05 pts tall in PDF)
-                textY = baseBottomY + (3.5 - index) * 47.05 - 4;
-              } else {
-                // Dynamically append new rows below row 4 — no border lines drawn
-                const dynamicIndex = index - 4;
-                const yPos = baseBottomY - dynamicIndex * rowHeightPDF;
-                textY = yPos - 22 * scaleY;
-
-                // Alternate very subtle background tint for even rows (no borders)
-                if (dynamicIndex % 2 === 0) {
-                  page.drawRectangle({
-                    x: startX,
-                    y: yPos - rowHeightPDF,
-                    width: 698 * scaleX,
-                    height: rowHeightPDF,
-                    color: rgb(0.97, 0.97, 0.99),
-                    opacity: 1
-                  });
-                }
-              }
-
-              // Serial number
-              page.drawText(`${1 + index}`, {
-                x: startX + 22 * scaleX,
-                y: textY,
-                size: 10 * scaleY,
-                font: fallbackRegularFont,
-                color: rgb(0.4, 0.4, 0.4)
-              });
-
-              // Only draw details if we have this position in our positions array
-              if (index < positions.length) {
-                const roleTxt = pos.role ? pos.role.substring(0, 30) : '';
-                if (roleTxt.trim()) {
-                  page.drawText(roleTxt, { x: startX + 70 * scaleX, y: textY, size: 10 * scaleY, font: fallbackBoldFont, color: rgb(0.07, 0.07, 0.15) });
-                }
-
-                const posTxt = pos.positions ? String(pos.positions) : '';
-                if (posTxt.trim()) {
-                  page.drawText(posTxt, { x: startX + 345 * scaleX, y: textY, size: 10 * scaleY, font: fallbackRegularFont, color: rgb(0.15, 0.15, 0.15) });
-                }
-
-                const qualTxt = pos.qualifications ? pos.qualifications.substring(0, 20) : '';
-                if (qualTxt.trim()) {
-                  page.drawText(qualTxt, { x: startX + 415 * scaleX, y: textY, size: 10 * scaleY, font: fallbackRegularFont, color: rgb(0.15, 0.15, 0.15) });
-                }
-
-                const pkgTxt = pos.package ? pos.package.substring(0, 20) : '';
-                if (pkgTxt.trim()) {
-                  page.drawText(pkgTxt, { x: startX + 560 * scaleX, y: textY, size: 10 * scaleY, font: fallbackRegularFont, color: rgb(0.15, 0.15, 0.15) });
-                }
-              }
-            }
-
-            // Shift Note line down if we added dynamic rows (no box drawn around it)
-            if (noteLine && numDynamicRows > 0) {
-              const shiftedNoteY = baseBottomY - numDynamicRows * 35 * scaleY;
-              page.drawText(noteLine.str, {
-                x: noteLine.minX,
-                y: shiftedNoteY - 20,
-                size: noteLine.height * 0.9,
-                font: fallbackRegularFont,
-                color: rgb(0, 0, 0)
-              });
-            }
-          });
-        }
-
-        // --- Semantic Find and Replace ---
-        // ONLY replace explicit placeholder codes in the document.
-        // Do NOT replace the detected company name (e.g. "MABS") globally.
-        const replacements = [];
-
-        // ── DATE PLACEHOLDERS ──────────────────────────────────────────────────
-        // Covers: xxx_date, XXX_DATE, [date], [DATE], date xxx, Date : XXXX, etc.
-        if (date) {
-          // Explicit placeholder codes the template author puts in the PDF
-          replacements.push({ target: 'xxx_date', text: date });
-          replacements.push({ target: 'XXX_DATE', text: date });
-          replacements.push({ target: 'Xxx_date', text: date });
-          replacements.push({ target: '[date]', text: date });
-          replacements.push({ target: '[DATE]', text: date });
-          replacements.push({ target: '{{date}}', text: date });
-          replacements.push({ target: '{{DATE}}', text: date });
-          // Legacy / other formats
-          replacements.push({ target: 'date xxx', text: date });
-          replacements.push({ target: 'DATE XXX', text: date });
-          replacements.push({ target: 'Date : XXXX', text: `Date : ${date}` });
-          replacements.push({ target: 'Date: XXXX', text: `Date: ${date}` });
-          replacements.push({ target: 'DATE : XXXX', text: `DATE : ${date}` });
-          replacements.push({ target: 'Date :XXXX', text: `Date :${date}` });
-          replacements.push({ target: 'Date : xxx', text: `Date : ${date}` });
-          replacements.push({ target: 'date : xxx', text: `Date : ${date}` });
-        }
-
-        // ── COMPANY NAME PLACEHOLDERS ──────────────────────────────────────────
-        // Covers: xxx_company, XXX_COMPANY, [company], To : XXXX, etc.
-        if (companyName) {
-          // Explicit placeholder codes
-          replacements.push({ target: 'xxx_company', text: companyName });
-          replacements.push({ target: 'XXX_COMPANY', text: companyName });
-          replacements.push({ target: 'Xxx_company', text: companyName });
-          replacements.push({ target: '[company]', text: companyName });
-          replacements.push({ target: '[COMPANY]', text: companyName });
-          replacements.push({ target: '{{company}}', text: companyName });
-          replacements.push({ target: '{{COMPANY}}', text: companyName });
-          // To : field variants
-          replacements.push({ target: 'To : XXXX', text: `To : ${companyName}` });
-          replacements.push({ target: 'To: XXXX', text: `To: ${companyName}` });
-          replacements.push({ target: 'TO : XXXX', text: `To : ${companyName}` });
-          replacements.push({ target: 'To : xxx', text: `To : ${companyName}` });
-          replacements.push({ target: 'to : xxx', text: `To : ${companyName}` });
-          replacements.push({ target: 'company xxx', text: companyName });
-          replacements.push({ target: 'COMPANY XXX', text: companyName });
-          // Named bracket variants
-          replacements.push({ target: 'XXXX[Company Name]', text: companyName });
-          replacements.push({ target: '[Company Name]', text: companyName });
-          replacements.push({ target: "XXXX[COMPANY'S NAME]", text: companyName });
-          replacements.push({ target: "[COMPANY'S NAME]", text: companyName });
-          replacements.push({ target: "XXXX[Company's Name]", text: companyName });
-          replacements.push({ target: "[Company's Name]", text: companyName });
-        }
-
-        // ── REPLACEMENT GUARANTEE PLACEHOLDERS ────────────────────────────────
-        if (replacementGuarantee) {
-          let guaranteeText = replacementGuarantee.trim();
-          // Auto-append "month"/"months" if only a number is provided
-          if (/^\d+$/.test(guaranteeText)) {
-            const num = parseInt(guaranteeText, 10);
-            guaranteeText = `${num} ${num === 1 ? 'month' : 'months'}`;
-          }
-          replacements.push({ target: 'XXmonth', text: guaranteeText });
-          replacements.push({ target: 'XX month', text: guaranteeText });
-          replacements.push({ target: 'XXmonths', text: guaranteeText });
-          replacements.push({ target: 'XX months', text: guaranteeText });
-          replacements.push({ target: 'xxx_months', text: guaranteeText });
-          replacements.push({ target: '[months]', text: guaranteeText });
-        }
-
-        // ── SERVICE FEE PERCENTAGE PLACEHOLDERS ────────────────────────────────
-        if (serviceFee) {
-          let feeText = serviceFee.trim();
-          // Auto-append '%' if only a number (optionally with decimal) is provided
-          if (/^\d+(\.\d+)?$/.test(feeText)) {
-            feeText = feeText + '%';
-          }
-          replacements.push({ target: 'xx%', text: feeText });
-          replacements.push({ target: 'xx %', text: feeText });
-          replacements.push({ target: 'XX%', text: feeText });
-          replacements.push({ target: 'XX %', text: feeText });
-          replacements.push({ target: 'xxx%', text: feeText });
-          replacements.push({ target: 'xxx_%', text: feeText });
-          replacements.push({ target: '[fee]', text: feeText });
-          replacements.push({ target: 'Rs . XX%', text: `Rs . ${feeText}` });
-          replacements.push({ target: 'Rs . XX %', text: `Rs . ${feeText}` });
-        }
-
-        if (replacements.length > 0) {
-          const pageLines = pdfLines.filter(l => l.page === pageNum);
-          pageLines.sort((a, b) => b.y - a.y);
-
-          let chars = [];
-          pageLines.forEach(line => {
-            line.items.forEach((item, index) => {
-              if (index > 0) {
-                chars.push({ char: ' ', item: null, delete: false });
-              }
-              for (let i = 0; i < item.str.length; i++) {
-                chars.push({ char: item.str[i], item: item, delete: false });
-              }
-            });
-            chars.push({ char: '\n', item: null });
-          });
-
-          const combinedText = chars.map(c => c.char).join('');
-          const modifiedItems = new Map();
-
-          replacements.forEach(({ target, text, bg }) => {
-            if (!target || !text) return;
-            const escapedTarget = target.trim().replace(/\s+/g, ' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const flexibleTarget = escapedTarget.replace(/ /g, '(?:\\s+)').replace(/['’]/g, "['’]");
-            const replaceRegex = new RegExp(flexibleTarget, "gi");
-
-            let match;
-            while ((match = replaceRegex.exec(combinedText)) !== null) {
-              const startIndex = match.index;
-              const endIndex = startIndex + match[0].length;
-
-              // Check if any character in the match has already been deleted
-              let alreadyDeleted = false;
-              for (let i = startIndex; i < endIndex; i++) {
-                if (chars[i] && chars[i].delete) {
-                  alreadyDeleted = true;
-                  break;
-                }
-              }
-              if (alreadyDeleted) continue;
-
-              const matchItemsSet = new Set();
-              for (let i = startIndex; i < endIndex; i++) {
-                if (chars[i].item) matchItemsSet.add(chars[i].item);
-                if (chars[i].item || chars[i].char === ' ') chars[i].delete = true;
-              }
-
-              const matchItems = Array.from(matchItemsSet);
-              const compWords = text.split(/\s+/).filter(w => w);
-              const buckets = Array.from({ length: matchItems.length }, () => []);
-
-              if (compWords.length > 0 && matchItems.length > 0) {
-                for (let i = 0; i < compWords.length; i++) {
-                  const bucketIndex = Math.min(Math.floor((i / compWords.length) * matchItems.length), matchItems.length - 1);
-                  buckets[bucketIndex].push(compWords[i]);
-                }
-              }
-
-              matchItems.forEach((item, itemIdx) => {
-                let inserted = false;
-                for (let i = startIndex; i < endIndex; i++) {
-                  if (chars[i].item === item && chars[i].delete && !inserted) {
-                    chars[i].insert = buckets[itemIdx].join(' ');
-                    inserted = true;
-                  }
-                }
-                let calculatedBg = '#FFFFFF'; // Default White
-                if (item.transform[5] > 710) {
-                  calculatedBg = '#13B6D7'; // Blue Banner color
-                }
-                modifiedItems.set(item, calculatedBg);
-              });
-            }
-          });
-
-          const itemReplacementMap = new Map();
-          pageLines.forEach(line => {
-            line.items.forEach(item => {
-              const itemChars = chars.filter(c => c.item === item);
-              const hasMod = itemChars.some(c => c.delete || c.insert !== undefined);
-              if (hasMod) {
-                let newStr = "";
-                itemChars.forEach(c => {
-                  if (c.insert !== undefined) newStr += c.insert;
-                  if (!c.delete) newStr += c.char;
-                });
-                itemReplacementMap.set(item, newStr);
-              }
-            });
-          });
-
-          // First pass: Erase all modified placeholder text elements
-          itemReplacementMap.forEach((newStr, item) => {
-            const itemX = item.transform[4];
-            const itemY = item.transform[5];
-
-            // Determine appropriate background color to erase the item
-            let bgColorHex = '#FFFFFF';
-            if (itemY > 710) {
-              bgColorHex = '#13B6D7'; // Header banner background
-            }
-            const rgbColor = hexToRgb(bgColorHex);
-
-            // Erase exactly the original text area — no padding to avoid visible colour bleed
-            page.drawRectangle({
-              x: itemX,
-              y: itemY,
-              width: item.width,
-              height: item.height,
-              color: rgb(rgbColor.r, rgbColor.g, rgbColor.b)
-            });
-          });
-
-          // Second pass: Write the new text for all modified placeholder text elements
-          itemReplacementMap.forEach((newStr, item) => {
-            if (newStr) {
-              const itemX = item.transform[4];
-              const itemY = item.transform[5];
-              const originalFontSize = (item.transform && item.transform[3])
-                ? Math.abs(item.transform[3])
-                : (item.height || 12);
-
-              page.drawText(newStr, {
-                x: itemX,
-                y: itemY,
-                size: originalFontSize,
-                font: helveticaFont,
-                color: rgb(textColorRgb.r, textColorRgb.g, textColorRgb.b)
-              });
-            }
-          });
-        }
-      }
-
-      const modifiedPdfBytes = await pdfDoc.save();
-      const modifiedBase64 = uint8ArrayToBase64(modifiedPdfBytes);
-      const modifiedDataUrl = `data:application/pdf;base64,${modifiedBase64}`;
-
-      setPreviewPdfData(modifiedDataUrl);
-
+      setPreviewPdfData(`data:application/pdf;base64,${uint8ArrayToBase64(bytes)}`);
+      setFillWarnings(warnings);
     } catch (err) {
-      console.error("Error generating PDF preview:", err);
-      // Optional alert for easier debugging if it fails silently again
-      console.log("PDF generation failed. Error details:", err.message);
+      console.error('Error generating PDF preview:', err);
     }
   };
+
+  // Live PDF generation (debounced; stale runs are discarded)
+  const runId = React.useRef(0);
+  useEffect(() => {
+    if (!fileData || !analysis) return;
+    const timer = setTimeout(() => { generatePreview(); }, 300);
+    return () => clearTimeout(timer);
+  }, [analysis, date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, textColor, fontFamily, isBold, isItalic]);
 
   const handleAddPosition = () => {
     if (positionForm.role) {
@@ -953,6 +447,12 @@ const EditorView = ({ onBack, doc, logo }) => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h3 style={{ fontSize: '18px', fontWeight: '700', margin: 0, color: '#111827' }}>Edit Data</h3>
               </div>
+
+              {fillWarnings.length > 0 && (
+                <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '8px', padding: '10px 12px', marginBottom: '16px', fontSize: '12px', color: '#92400E', lineHeight: 1.5 }}>
+                  {fillWarnings.map((w, i) => <div key={i}>{w}</div>)}
+                </div>
+              )}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

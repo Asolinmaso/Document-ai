@@ -16,13 +16,28 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // --- MIDDLEWARE ---
 
-const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:5173';
+// FRONTEND_URL may hold several comma-separated origins. Trailing slashes are ignored because
+// browsers send the Origin header without one ("https://app.vercel.app", not ".../").
+const normalizeOrigin = (url) => url.trim().replace(/\/+$/, '');
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+  .split(',')
+  .map(normalizeOrigin)
+  .filter(Boolean);
+const isProduction = process.env.NODE_ENV === 'production';
+const isLocalOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' ? allowedOrigin : '*',
+  origin(origin, callback) {
+    // No Origin header: same-origin requests, curl, server-to-server calls
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(normalizeOrigin(origin))) return callback(null, true);
+    if (!isProduction && isLocalOrigin(origin)) return callback(null, true);
+    return callback(null, false);
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -74,6 +89,17 @@ const authenticateToken = (req, res, next) => {
 
 app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'DocAI Backend is running.', version: '1.0.0' });
+});
+
+// Lets the frontend (and hosting platforms) check that the API and database are reachable
+app.get('/api/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', database: 'up' });
+  } catch (error) {
+    console.error('Health check failed:', error.message);
+    res.status(503).json({ status: 'degraded', database: 'down' });
+  }
 });
 
 // --- AUTHENTICATION ROUTES ---
@@ -649,5 +675,14 @@ initSchema()
   })
   .catch((err) => {
     console.error('❌ Database setup failed. Server not started.', err);
+    const host = err?.hostname || process.env.PGHOST || '';
+    if (err?.code === 'ENOTFOUND' && /^dpg-[a-z0-9]+-a$/i.test(host)) {
+      console.error(
+        `\n💡 "${host}" is a Render *internal* hostname; it only resolves inside Render's network.\n` +
+        '   To run locally, use the "External Database URL" from the Render dashboard, e.g.\n' +
+        '   DATABASE_URL=postgres://user:password@dpg-xxxx-a.<region>-postgres.render.com/dbname\n' +
+        '   (or point PGHOST/PGUSER/... at a local PostgreSQL).\n'
+      );
+    }
     process.exit(1);
   });

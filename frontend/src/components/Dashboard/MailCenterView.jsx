@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { fetchMail, saveMail, updateMailFolder, deleteMail, syncMail, sendMail } from '../../services/dataService';
 import { 
   Search, 
   Trash2, 
@@ -49,10 +50,14 @@ const MailCenterView = () => {
 
   // Load emails from DB on mount
   const loadEmails = () => {
-    fetch('/api/mail')
-      .then(res => res.json())
+    fetchMail()
       .then(data => { if (Array.isArray(data)) setEmails(data); })
       .catch(err => console.error('Failed to load emails:', err));
+  };
+
+  // Runs a mail API call; reports the server's message instead of failing silently
+  const attempt = async (fn) => {
+    try { await fn(); return true; } catch (err) { alert(err.message || 'Request failed'); return false; }
   };
 
   useEffect(() => {
@@ -62,8 +67,7 @@ const MailCenterView = () => {
   const handleSync = async () => {
     setIsSyncing(true);
     try {
-      const response = await fetch('/api/mail/sync');
-      const data = await response.json();
+      const data = await syncMail();
       if (data.success) {
         if (data.synced > 0) alert(`Synced ${data.synced} new emails from Gmail!`);
         loadEmails();
@@ -72,7 +76,7 @@ const MailCenterView = () => {
       }
     } catch (err) {
       console.error(err);
-      alert('Error connecting to sync server');
+      alert(err.message || 'Error connecting to sync server');
     } finally {
       setIsSyncing(false);
     }
@@ -89,12 +93,10 @@ const MailCenterView = () => {
   const handleDeleteSelected = async () => {
     if (selectedEmailIds.length === 0) return;
     if (activeFolder === 'Trash') {
-      await Promise.all(selectedEmailIds.map(id => fetch(`/api/mail/${id}`, { method: 'DELETE' })));
+      if (!(await attempt(() => Promise.all(selectedEmailIds.map(id => deleteMail(id)))))) return;
       setEmails(emails.filter(email => !selectedEmailIds.includes(email.id)));
     } else {
-      await Promise.all(selectedEmailIds.map(id =>
-        fetch(`/api/mail/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: 'Trash' }) })
-      ));
+      if (!(await attempt(() => Promise.all(selectedEmailIds.map(id => updateMailFolder(id, 'Trash')))))) return;
       setEmails(emails.map(email => selectedEmailIds.includes(email.id) ? { ...email, folder: 'Trash' } : email));
     }
     setSelectedEmailIds([]);
@@ -102,28 +104,26 @@ const MailCenterView = () => {
 
   const handleRestoreSelected = async () => {
     if (selectedEmailIds.length === 0) return;
-    await Promise.all(selectedEmailIds.map(id =>
-      fetch(`/api/mail/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: 'Inbox' }) })
-    ));
+    if (!(await attempt(() => Promise.all(selectedEmailIds.map(id => updateMailFolder(id, 'Inbox')))))) return;
     setEmails(emails.map(email => selectedEmailIds.includes(email.id) ? { ...email, folder: 'Inbox' } : email));
     setSelectedEmailIds([]);
   };
 
   const handleEmptyTrash = async () => {
     const trashIds = emails.filter(e => e.folder === 'Trash').map(e => e.id);
-    await Promise.all(trashIds.map(id => fetch(`/api/mail/${id}`, { method: 'DELETE' })));
+    if (!(await attempt(() => Promise.all(trashIds.map(id => deleteMail(id)))))) return;
     setEmails(emails.filter(email => email.folder !== 'Trash'));
     setSelectedEmailIds([]);
   };
 
   const handleRestore = async (id) => {
-    await fetch(`/api/mail/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: 'Inbox' }) });
+    if (!(await attempt(() => updateMailFolder(id, 'Inbox')))) return;
     setEmails(emails.map(email => email.id === id ? { ...email, folder: 'Inbox' } : email));
     setSelectedEmailIds(selectedEmailIds.filter(eId => eId !== id));
   };
 
   const handlePermanentDelete = async (id) => {
-    await fetch(`/api/mail/${id}`, { method: 'DELETE' });
+    if (!(await attempt(() => deleteMail(id)))) return;
     setEmails(emails.filter(email => email.id !== id));
     setSelectedEmailIds(selectedEmailIds.filter(eId => eId !== id));
   };
@@ -181,7 +181,7 @@ const MailCenterView = () => {
     if (activeFolder === 'Trash') {
       await handlePermanentDelete(viewingEmail.id);
     } else {
-      await fetch(`/api/mail/${viewingEmail.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: 'Trash' }) });
+      if (!(await attempt(() => updateMailFolder(viewingEmail.id, 'Trash')))) return;
       setEmails(emails.map(email => email.id === viewingEmail.id ? { ...email, folder: 'Trash' } : email));
     }
     setViewingEmail(null);
@@ -201,20 +201,15 @@ const MailCenterView = () => {
 
     if (folderName === 'Sent') {
       try {
-        const response = await fetch('/api/mail/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: toStr,
-            cc: ccStr,
-            bcc: bccStr,
-            subject: subjectStr,
-            body: bodyStr,
-            attachments: composeData.attachments
-          })
+        const data = await sendMail({
+          to: toStr,
+          cc: ccStr,
+          bcc: bccStr,
+          subject: subjectStr,
+          body: bodyStr,
+          attachments: composeData.attachments
         });
-        const data = await response.json();
-        
+
         if (data.success) {
           if (data.previewUrl) {
             console.log("Ethereal Preview URL: ", data.previewUrl);
@@ -227,7 +222,7 @@ const MailCenterView = () => {
         }
       } catch (err) {
         console.error(err);
-        alert('Failed to send email. Check console for details.');
+        alert(err.message || 'Failed to send email. Check console for details.');
         return; // Don't add to sent folder if it failed
       }
     }
@@ -249,11 +244,7 @@ const MailCenterView = () => {
     };
 
     try {
-      await fetch('/api/mail', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newEmail)
-      });
+      await saveMail(newEmail);
     } catch (err) {
       console.error('Failed to save email to database:', err);
     }

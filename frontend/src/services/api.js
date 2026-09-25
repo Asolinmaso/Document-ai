@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const rawBaseURL = import.meta.env.VITE_API_URL || '';
+// VITE_API_URL is either a relative path served through the Vite dev proxy ("/api")
+// or the absolute URL of the deployed backend ("https://my-backend.onrender.com").
+const rawBaseURL = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
 const baseURL = rawBaseURL.endsWith('/api') ? rawBaseURL : `${rawBaseURL}/api`;
 
 const api = axios.create({
