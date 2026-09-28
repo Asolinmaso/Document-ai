@@ -376,7 +376,14 @@ const buildReplacements = ({ date, companyName, replacementGuarantee, serviceFee
   if (companyName) {
     // The sentence "... services to <client>. We appreciate ..." – works for placeholders and for old client names.
     list.push({ re: /services\s+to\s+([\s\S]+?)\s*\.?\s*We\s+appreciate/gi, group: 1, text: companyName, reflow: true });
+    // Closing paragraphs of the Manvian-branded template, e.g. "... add substantial value to
+    // <client> and help secure ..." and "... contributing to <client>['s] continued success."
+    list.push({ re: /add\s+substantial\s+value\s+to\s+([\s\S]+?)\s+and\s+help\s+secure/gi, group: 1, text: companyName, reflow: true });
+    list.push({ re: /contributing\s+to\s+([\s\S]+?)\s+continued\s+success/gi, group: 1, text: companyName, reflow: true });
     token(['xxx_company', '[company]', '{{company}}', 'company xxx', 'XXXX[Company Name]', '[Company Name]', "XXXX[Company's Name]", "[Company's Name]"], companyName);
+    // Literal placeholder client name baked into that same template's sample copy, wherever it
+    // recurs (full "Sharp Associates Asset Developers" or the short "Sharp Associates" form).
+    list.push({ re: /Sharp\s+Associates(?:\s+Asset\s+Developers)?/gi, group: 0, text: companyName, reflow: true });
   }
   if (replacementGuarantee) {
     let g = replacementGuarantee.trim();
