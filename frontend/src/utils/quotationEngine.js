@@ -592,11 +592,16 @@ const applyReplacements = (page, pageLines, replacements, ctx) => {
 const fillHeaderFields = (page, pageLines, values, ctx) => {
   const { fonts, safe, pageW, bannerY, textRgb } = ctx;
   const fields = [
-    { re: /^\s*date\s*:/i, label: 'Date :', value: values.date },
-    { re: /^\s*to\s*:/i, label: 'To :', value: values.companyName },
+    // The date sits directly above "To :" in most banners, so it must stay on one line –
+    // wrapping would push its second line down into (and get erased by) the field below it.
+    // A short, bounded shrink keeps it on one line without touching the configured value font.
+    { re: /^\s*date\s*:/i, label: 'Date :', value: values.date, allowShrink: true },
+    // The company name is the last line in the banner (nothing below it to collide with), so
+    // it keeps its full configured size and wraps instead of shrinking or truncating.
+    { re: /^\s*to\s*:/i, label: 'To :', value: values.companyName, allowShrink: false },
   ];
   pageLines.filter((l) => l.y > bannerY).forEach((line) => {
-    fields.forEach(({ re, label, value }) => {
+    fields.forEach(({ re, label, value, allowShrink }) => {
       if (!value) return;
       const idx = line.items.findIndex((i) => re.test(i.str));
       if (idx < 0) return;
@@ -608,16 +613,23 @@ const fillHeaderFields = (page, pageLines, values, ctx) => {
       const txt = safe(labelOnly ? value : `${label} ${value}`);
       const maxW = pageW - RIGHT_MARGIN - x;
 
-      // Long values wrap onto extra lines beneath the field at the template's own font size,
-      // instead of shrinking the font or truncating the text with "...".
-      const wrapped = wrapText(txt, fonts.main, size, maxW);
-      const lineH = size * 1.3;
-      const bandTop = labelItem.transform[5] + size * 1.15;
-      const bandBottom = labelItem.transform[5] - size * 0.4 - lineH * (wrapped.length - 1);
+      let fs = size;
+      let wrapped;
+      if (allowShrink) {
+        while (fonts.main.widthOfTextAtSize(txt, fs) > maxW && fs > size * 0.7) fs -= 0.25;
+        wrapped = fonts.main.widthOfTextAtSize(txt, fs) <= maxW ? [txt] : wrapText(txt, fonts.main, fs, maxW);
+      } else {
+        // Long values wrap onto extra lines beneath the field at the template's own font size,
+        // instead of shrinking the font or truncating the text with "...".
+        wrapped = wrapText(txt, fonts.main, fs, maxW);
+      }
+      const lineH = fs * 1.3;
+      const bandTop = labelItem.transform[5] + fs * 1.15;
+      const bandBottom = labelItem.transform[5] - fs * 0.4 - lineH * (wrapped.length - 1);
       page.drawRectangle({ x: x - 0.5, y: bandBottom, width: pageW - RIGHT_MARGIN - x + 0.5, height: bandTop - bandBottom, color: rgb(ctx.banner.r, ctx.banner.g, ctx.banner.b) });
 
       wrapped.forEach((ln, i) => {
-        page.drawText(ln, { x, y: labelItem.transform[5] - i * lineH, size, font: fonts.main, color: rgb(textRgb.r, textRgb.g, textRgb.b) });
+        page.drawText(ln, { x, y: labelItem.transform[5] - i * lineH, size: fs, font: fonts.main, color: rgb(textRgb.r, textRgb.g, textRgb.b) });
       });
     });
   });
