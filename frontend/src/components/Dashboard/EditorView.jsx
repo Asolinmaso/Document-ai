@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import { analyzeTemplate, fillQuotation } from '../../utils/quotationEngine';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
@@ -22,7 +22,9 @@ import {
   Edit
 } from 'lucide-react';
 
-const PdfPage = ({ pdfDoc, pageNum, width, height }) => {
+const EMPTY_POSITION_FORM = { role: '', positions: '', qualifications: '', package: '' };
+
+const PdfPage = memo(({ pdfDoc, pageNum, width, height }) => {
   const canvasRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -73,7 +75,261 @@ const PdfPage = ({ pdfDoc, pageNum, width, height }) => {
   }, [pdfDoc, pageNum, width, height]);
 
   return <canvas ref={canvasRef} style={{ display: 'block' }} />;
-};
+});
+
+// Isolated so that typing in the "Edit Data" fields (parent state) never has to reconcile the
+// PDF canvas / iframe subtree. It only re-renders when the document actually changes: on mode
+// toggle, or ~300ms after the user stops typing (once the debounced fill finishes).
+const DocumentCanvas = memo(({ fileData, previewPdfData, isPreviewMode, pdfDoc, numPages }) => (
+  <div style={{ flex: isPreviewMode ? '0 1 auto' : 1, display: 'flex', justifyContent: 'center', background: '#F9FAFB', padding: '20px', borderRadius: '16px', border: '1px solid #E5E7EB' }}>
+    {fileData ? (
+      <div style={{
+        width: '210mm',
+        height: '297mm',
+        background: 'white',
+        boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+        position: 'relative',
+        overflowY: isPreviewMode ? 'hidden' : 'auto',
+        overflowX: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '20px'
+      }}>
+        {isPreviewMode ? (
+          <iframe
+            src={previewPdfData || fileData}
+            style={{ width: '100%', height: '100%', border: 'none' }}
+            title="Uploaded PDF Preview"
+          />
+        ) : (
+          pdfDoc ? (
+            Array.from({ length: numPages }, (_, i) => i + 1).map(pageNum => (
+              <div key={pageNum} style={{
+                width: '100%',
+                height: '100%',
+                position: 'relative',
+                overflow: 'hidden',
+                flexShrink: 0
+              }}>
+                <PdfPage
+                  pdfDoc={pdfDoc}
+                  pageNum={pageNum}
+                  width={794}
+                  height={1123}
+                />
+              </div>
+            ))
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF' }}>
+              <p>Loading document pages...</p>
+            </div>
+          )
+        )}
+      </div>
+    ) : (
+      <div style={{
+        width: '210mm',
+        height: '297mm',
+        background: 'white',
+        boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+        position: 'relative',
+        overflow: 'hidden',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#9CA3AF'
+      }}>
+        <p>No document uploaded</p>
+      </div>
+    )}
+  </div>
+));
+
+// Format-only controls: none of these depend on the text fields the user is typing into,
+// so memoizing keeps them from re-rendering on every keystroke elsewhere in the form.
+const EditorToolbar = memo(({ fontFamily, setFontFamily, fontSize, setFontSize, isBold, setIsBold, isItalic, setIsItalic, isUnderline, setIsUnderline, textColor, setTextColor }) => (
+  <div style={{
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    padding: '12px 20px',
+    border: '1.5px solid #E5E7EB',
+    borderRadius: '12px',
+    marginBottom: '24px',
+    color: '#4B5563'
+  }}>
+    <div style={{ paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
+      <select value={fontFamily} onChange={(e) => setFontFamily(e.target.value)} style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: '500', outline: 'none', color: '#4B5563', cursor: 'pointer' }}>
+        <option value="Montserrat">Montserrat</option>
+        <option value="Inter">Inter</option>
+        <option value="Arial">Arial</option>
+        <option value="Times New Roman">Times New Roman</option>
+      </select>
+    </div>
+    <div style={{ paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
+      <select value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: '500', outline: 'none', color: '#4B5563', cursor: 'pointer' }}>
+        {[10, 11, 12, 13, 14, 16, 18, 20, 24].map(size => (
+          <option key={size} value={size}>{size}</option>
+        ))}
+      </select>
+    </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
+      <Bold size={16} cursor="pointer" color={isBold ? '#6C2BD9' : '#4B5563'} onClick={() => setIsBold(!isBold)} />
+      <Italic size={16} cursor="pointer" color={isItalic ? '#6C2BD9' : '#4B5563'} onClick={() => setIsItalic(!isItalic)} />
+      <Underline size={16} cursor="pointer" color={isUnderline ? '#6C2BD9' : '#4B5563'} onClick={() => setIsUnderline(!isUnderline)} />
+      <Strikethrough size={16} cursor="pointer" color="#4B5563" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', position: 'relative' }}>
+        <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} style={{ opacity: 0, position: 'absolute', width: '100%', height: '100%', cursor: 'pointer' }} title="Change Text Color" />
+        <Type size={16} color={textColor !== '#111827' ? textColor : '#4B5563'} />
+        <ChevronDown size={12} color="#4B5563" />
+      </div>
+    </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
+      <AlignLeft size={16} />
+      <AlignCenter size={16} />
+      <AlignRight size={16} />
+      <AlignJustify size={16} />
+    </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <List size={16} />
+      <ListOrdered size={16} />
+      <Link size={16} />
+      <Type size={16} />
+    </div>
+  </div>
+));
+
+const fieldInputStyle = { padding: '6px 10px', borderRadius: '6px', border: '1px solid #D1D5DB', fontSize: '12px', outline: 'none' };
+
+// Fully local form state: typing a role/package/etc. only re-renders this small component,
+// never the positions list or the document canvas. Mount a fresh instance (via `key` at the
+// call site) whenever the edit target changes, so its local state resets to the right values.
+const PositionForm = memo(({ initialValues, isEditing, onSubmit, onCancel }) => {
+  const [form, setForm] = useState(initialValues);
+
+  const update = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+
+  const submit = () => {
+    if (!form.role.trim()) return;
+    onSubmit(form);
+    if (!isEditing) setForm(EMPTY_POSITION_FORM);
+  };
+
+  return (
+    <div style={{
+      background: isEditing ? '#EEF2FF' : '#F5F3FF',
+      borderRadius: '12px',
+      padding: '16px',
+      marginTop: '8px',
+      border: isEditing ? '1px solid #C7D2FE' : '1px solid #EDE9FE'
+    }}>
+      <h4 style={{ fontSize: '13px', fontWeight: '700', color: '#4C1D95', margin: '0 0 12px 0' }}>
+        {isEditing ? 'Edit Position :' : 'Position Details :'}
+      </h4>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <label style={{ fontSize: '11px', fontWeight: '600', color: '#6B7280' }}>Role :</label>
+          <input type="text" value={form.role} onChange={update('role')} style={fieldInputStyle} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <label style={{ fontSize: '11px', fontWeight: '600', color: '#6B7280' }}>No. Of Positions :</label>
+          <input type="text" value={form.positions} onChange={update('positions')} style={fieldInputStyle} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <label style={{ fontSize: '11px', fontWeight: '600', color: '#6B7280' }}>Qualifications :</label>
+          <input type="text" value={form.qualifications} onChange={update('qualifications')} style={fieldInputStyle} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <label style={{ fontSize: '11px', fontWeight: '600', color: '#6B7280' }}>Package :</label>
+          <input type="text" value={form.package} onChange={update('package')} style={fieldInputStyle} />
+        </div>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignSelf: 'flex-end' }}>
+          {isEditing && (
+            <button
+              onClick={onCancel}
+              style={{ background: 'white', color: '#4B5563', border: '1px solid #D1D5DB', borderRadius: '6px', padding: '8px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            onClick={submit}
+            style={{ background: '#6C2BD9', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}
+          >
+            {isEditing ? 'Update' : 'Add'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const PositionsList = memo(({ positions, editingId, onEdit, onDelete }) => {
+  if (positions.length === 0) return null;
+  return (
+    <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+      <h4 style={{ fontSize: '12px', fontWeight: '700', color: '#6C2BD9', margin: '0 0 8px 0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Added Positions</h4>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 52px 64px 72px 52px',
+        gap: '6px',
+        padding: '4px 8px',
+        fontSize: '10px',
+        fontWeight: '700',
+        color: '#9CA3AF',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em'
+      }}>
+        <span>Role</span>
+        <span>Pos</span>
+        <span>Qual</span>
+        <span>Pkg</span>
+        <span></span>
+      </div>
+
+      {positions.map((pos, idx) => (
+        <div key={pos.id} style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 52px 64px 72px 52px',
+          gap: '6px',
+          alignItems: 'center',
+          padding: '7px 8px',
+          borderRadius: '8px',
+          background: pos.id === editingId ? '#EEF2FF' : (idx % 2 === 0 ? '#F9FAFB' : 'transparent'),
+          fontSize: '12px'
+        }}>
+          <span style={{ fontWeight: '600', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pos.role || '—'}</span>
+          <span style={{ color: '#374151' }}>{pos.positions || '—'}</span>
+          <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pos.qualifications || '—'}</span>
+          <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pos.package || '—'}</span>
+          <div style={{ display: 'flex', gap: '2px', justifyContent: 'flex-end' }}>
+            <button
+              className="icon-btn"
+              onClick={() => onEdit(pos)}
+              title="Edit Position"
+              aria-label="Edit Position"
+              style={{ padding: '3px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: pos.id === editingId ? '#6C2BD9' : '#9CA3AF' }}
+            >
+              <Edit size={13} />
+            </button>
+            <button
+              className="icon-btn"
+              onClick={() => onDelete(pos.id)}
+              title="Delete Position"
+              aria-label="Delete Position"
+              style={{ padding: '3px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF' }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#EF4444'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#9CA3AF'; }}
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+});
 
 const EditorView = ({ onBack, doc, logo }) => {
   const fileName = doc ? doc.name : "Recruitment Quotation";
@@ -139,14 +395,8 @@ const EditorView = ({ onBack, doc, logo }) => {
   const [serviceFee, setServiceFee] = useState(() => loadInitialState('serviceFee', ''));
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
-  const [positionForm, setPositionForm] = useState({
-    role: '',
-    positions: '',
-    qualifications: '',
-    package: ''
-  });
-
   const [positions, setPositions] = useState(() => loadInitialState('positions', []));
+  const [editingPositionId, setEditingPositionId] = useState(null);
 
   // Toolbar State
   const [fontFamily, setFontFamily] = useState(() => loadInitialState('fontFamily', 'Montserrat'));
@@ -158,11 +408,14 @@ const EditorView = ({ onBack, doc, logo }) => {
   const [listType, setListType] = useState(() => loadInitialState('listType', 'none'));
   const [textColor, setTextColor] = useState(() => loadInitialState('textColor', '#111827'));
 
-  // Save to localStorage whenever important state changes
-  // Note: we skip saving date if it's empty, so the auto-today default always applies on fresh open
+  // Persisted to localStorage ~400ms after the user stops changing anything, instead of on
+  // every keystroke — avoids a synchronous JSON.stringify + write on each character typed.
   useEffect(() => {
     const stateToSave = { date: date || undefined, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
-    try { localStorage.setItem(storageKey, JSON.stringify(stateToSave)); } catch { /* storage full or blocked */ }
+    const timer = setTimeout(() => {
+      try { localStorage.setItem(storageKey, JSON.stringify(stateToSave)); } catch { /* storage full or blocked */ }
+    }, 400);
+    return () => clearTimeout(timer);
   }, [storageKey, date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
 
   // Template analysis: text lines, table grid and banner colour are measured once per uploaded PDF
@@ -231,8 +484,13 @@ const EditorView = ({ onBack, doc, logo }) => {
     return window.btoa(binary);
   };
 
-  const generatePreview = async () => {
-    if (!fileData || !analysis) return;
+  // Live PDF generation (debounced; stale runs are discarded). This is the one genuinely
+  // expensive step (PDF-lib fill + re-render), so it — not the input fields — is what waits
+  // for a pause in typing.
+  const runId = React.useRef(0);
+
+  const generatePreview = async (forDownload = false) => {
+    if (!fileData || !analysis) return null;
     const myRun = ++runId.current;
 
     try {
@@ -245,29 +503,88 @@ const EditorView = ({ onBack, doc, logo }) => {
         { date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions },
         { fontFamily, isBold, isItalic, textColor }
       );
-      if (myRun !== runId.current) return; // a newer edit superseded this run
+      if (myRun !== runId.current && !forDownload) return null; // a newer edit superseded this run
 
-      setPreviewPdfData(`data:application/pdf;base64,${uint8ArrayToBase64(bytes)}`);
-      setFillWarnings(warnings);
+      const dataUrl = `data:application/pdf;base64,${uint8ArrayToBase64(bytes)}`;
+      if (!forDownload) {
+        setPreviewPdfData(dataUrl);
+        setFillWarnings(warnings);
+      }
+      return dataUrl;
     } catch (err) {
       console.error('Error generating PDF preview:', err);
+      return null;
     }
   };
 
-  // Live PDF generation (debounced; stale runs are discarded)
-  const runId = React.useRef(0);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  // Downloads exactly what's shown: re-runs the fill against the latest field values so the
+  // PDF file that lands on disk always matches the on-screen preview, instead of printing the whole app UI.
+  const handleDownloadPdf = async () => {
+    if (!fileData || isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const dataUrl = analysis ? await generatePreview(true) : fileData;
+      const source = dataUrl || previewPdfData || fileData;
+      if (!source) return;
+
+      const base64Data = source.split(',')[1] || source;
+      const binary = atob(base64Data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+
+      const safeName = (fileName || 'quotation').trim().replace(/[^a-z0-9\-_ ]+/gi, '').replace(/\s+/g, '_') || 'quotation';
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download PDF:', err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   useEffect(() => {
     if (!fileData || !analysis) return;
     const timer = setTimeout(() => { generatePreview(); }, 300);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis, date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, textColor, fontFamily, isBold, isItalic]);
 
-  const handleAddPosition = () => {
-    if (positionForm.role) {
-      setPositions([...positions, { ...positionForm, id: Date.now() }]);
-      setPositionForm({ role: '', positions: '', qualifications: '', package: '' });
-    }
-  };
+  // Position CRUD: stable identities so PositionsList (memoized) doesn't re-render just
+  // because EditorView re-rendered for an unrelated reason.
+  const handleSubmitPosition = useCallback((values) => {
+    setEditingPositionId((currentId) => {
+      setPositions((prev) => (
+        currentId
+          ? prev.map((p) => (p.id === currentId ? { ...values, id: currentId } : p))
+          : [...prev, { ...values, id: Date.now() }]
+      ));
+      return null;
+    });
+  }, []);
+
+  const handleEditPosition = useCallback((pos) => setEditingPositionId(pos.id), []);
+  const handleCancelEditPosition = useCallback(() => setEditingPositionId(null), []);
+  const handleDeletePosition = useCallback((id) => {
+    setPositions((prev) => prev.filter((p) => p.id !== id));
+    setEditingPositionId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  const editingPosition = useMemo(
+    () => positions.find((p) => p.id === editingPositionId) || null,
+    [positions, editingPositionId]
+  );
+  const positionFormInitialValues = editingPosition
+    ? { role: editingPosition.role, positions: editingPosition.positions, qualifications: editingPosition.qualifications, package: editingPosition.package }
+    : EMPTY_POSITION_FORM;
 
   return (
     <div style={{
@@ -364,8 +681,8 @@ const EditorView = ({ onBack, doc, logo }) => {
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
               zIndex: 10
             }}>
-              <div onClick={() => { window.print(); setShowMoreMenu(false); }} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', color: '#6C2BD9', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
-                Download as PDF
+              <div onClick={() => { setShowMoreMenu(false); handleDownloadPdf(); }} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', color: isDownloading ? '#9CA3AF' : '#6C2BD9', fontWeight: '600', fontSize: '13px', cursor: isDownloading ? 'default' : 'pointer' }}>
+                {isDownloading ? 'Preparing PDF…' : 'Download as PDF'}
               </div>
               <div onClick={() => { navigator.clipboard.writeText(window.location.href); alert('Link copied to clipboard!'); setShowMoreMenu(false); }} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', color: '#6C2BD9', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
                 Copy Link
@@ -380,55 +697,14 @@ const EditorView = ({ onBack, doc, logo }) => {
 
       {/* Toolbar */}
       {!isPreviewMode && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '16px',
-          padding: '12px 20px',
-          border: '1.5px solid #E5E7EB',
-          borderRadius: '12px',
-          marginBottom: '24px',
-          color: '#4B5563'
-        }}>
-          <div style={{ paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
-            <select value={fontFamily} onChange={(e) => setFontFamily(e.target.value)} style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: '500', outline: 'none', color: '#4B5563', cursor: 'pointer' }}>
-              <option value="Montserrat">Montserrat</option>
-              <option value="Inter">Inter</option>
-              <option value="Arial">Arial</option>
-              <option value="Times New Roman">Times New Roman</option>
-            </select>
-          </div>
-          <div style={{ paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
-            <select value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: '500', outline: 'none', color: '#4B5563', cursor: 'pointer' }}>
-              {[10, 11, 12, 13, 14, 16, 18, 20, 24].map(size => (
-                <option key={size} value={size}>{size}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
-            <Bold size={16} cursor="pointer" color={isBold ? '#6C2BD9' : '#4B5563'} onClick={() => setIsBold(!isBold)} />
-            <Italic size={16} cursor="pointer" color={isItalic ? '#6C2BD9' : '#4B5563'} onClick={() => setIsItalic(!isItalic)} />
-            <Underline size={16} cursor="pointer" color={isUnderline ? '#6C2BD9' : '#4B5563'} onClick={() => setIsUnderline(!isUnderline)} />
-            <Strikethrough size={16} cursor="pointer" color="#4B5563" />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '2px', position: 'relative' }}>
-              <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} style={{ opacity: 0, position: 'absolute', width: '100%', height: '100%', cursor: 'pointer' }} title="Change Text Color" />
-              <Type size={16} color={textColor !== '#111827' ? textColor : '#4B5563'} />
-              <ChevronDown size={12} color="#4B5563" />
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
-            <AlignLeft size={16} />
-            <AlignCenter size={16} />
-            <AlignRight size={16} />
-            <AlignJustify size={16} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <List size={16} />
-            <ListOrdered size={16} />
-            <Link size={16} />
-            <Type size={16} />
-          </div>
-        </div>
+        <EditorToolbar
+          fontFamily={fontFamily} setFontFamily={setFontFamily}
+          fontSize={fontSize} setFontSize={setFontSize}
+          isBold={isBold} setIsBold={setIsBold}
+          isItalic={isItalic} setIsItalic={setIsItalic}
+          isUnderline={isUnderline} setIsUnderline={setIsUnderline}
+          textColor={textColor} setTextColor={setTextColor}
+        />
       )}
 
       {/* Main Content Area */}
@@ -513,183 +789,32 @@ const EditorView = ({ onBack, doc, logo }) => {
                   />
                 </div>
 
-                {/* Position Details Form */}
-                <div style={{
-                  background: '#F5F3FF',
-                  borderRadius: '12px',
-                  padding: '16px',
-                  marginTop: '8px',
-                  border: '1px solid #EDE9FE'
-                }}>
-                  <h4 style={{ fontSize: '13px', fontWeight: '700', color: '#4C1D95', margin: '0 0 12px 0' }}>Position Details :</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', fontWeight: '600', color: '#6B7280' }}>Role :</label>
-                      <input type="text" value={positionForm.role} onChange={e => setPositionForm({ ...positionForm, role: e.target.value })} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #D1D5DB', fontSize: '12px', outline: 'none' }} />
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', fontWeight: '600', color: '#6B7280' }}>No. Of Positions :</label>
-                      <input type="text" value={positionForm.positions} onChange={e => setPositionForm({ ...positionForm, positions: e.target.value })} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #D1D5DB', fontSize: '12px', outline: 'none' }} />
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', fontWeight: '600', color: '#6B7280' }}>Qualifications :</label>
-                      <input type="text" value={positionForm.qualifications} onChange={e => setPositionForm({ ...positionForm, qualifications: e.target.value })} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #D1D5DB', fontSize: '12px', outline: 'none' }} />
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', fontWeight: '600', color: '#6B7280' }}>Package :</label>
-                      <input type="text" value={positionForm.package} onChange={e => setPositionForm({ ...positionForm, package: e.target.value })} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #D1D5DB', fontSize: '12px', outline: 'none' }} />
-                    </div>
-                    <button
-                      onClick={handleAddPosition}
-                      style={{
-                        background: '#6C2BD9',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        padding: '8px',
-                        fontSize: '12px',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        marginTop: '8px',
-                        alignSelf: 'flex-end',
-                        width: '80px'
-                      }}
-                    >
-                      Add
-                    </button>
-                  </div>
-                </div>
+                <PositionForm
+                  key={editingPositionId || 'new'}
+                  initialValues={positionFormInitialValues}
+                  isEditing={!!editingPositionId}
+                  onSubmit={handleSubmitPosition}
+                  onCancel={handleCancelEditPosition}
+                />
 
-                {/* List of Added Positions */}
-                {positions.length > 0 && (
-                  <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <h4 style={{ fontSize: '12px', fontWeight: '700', color: '#6C2BD9', margin: '0 0 8px 0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Added Positions</h4>
-
-                    {/* Header Row */}
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 52px 64px 72px 28px',
-                      gap: '6px',
-                      padding: '4px 8px',
-                      fontSize: '10px',
-                      fontWeight: '700',
-                      color: '#9CA3AF',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em'
-                    }}>
-                      <span>Role</span>
-                      <span>Pos</span>
-                      <span>Qual</span>
-                      <span>Pkg</span>
-                      <span></span>
-                    </div>
-
-                    {positions.map((pos, idx) => (
-                      <div key={pos.id} style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 52px 64px 72px 28px',
-                        gap: '6px',
-                        alignItems: 'center',
-                        padding: '7px 8px',
-                        borderRadius: '8px',
-                        background: idx % 2 === 0 ? '#F9FAFB' : 'transparent',
-                        fontSize: '12px'
-                      }}>
-                        <span style={{ fontWeight: '600', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pos.role || '—'}</span>
-                        <span style={{ color: '#374151' }}>{pos.positions || '—'}</span>
-                        <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pos.qualifications || '—'}</span>
-                        <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pos.package || '—'}</span>
-                        <button
-                          onClick={() => setPositions(positions.filter(p => p.id !== pos.id))}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: '#EF4444',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: '2px'
-                          }}
-                          title="Delete"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
+                <PositionsList
+                  positions={positions}
+                  editingId={editingPositionId}
+                  onEdit={handleEditPosition}
+                  onDelete={handleDeletePosition}
+                />
               </div>
             </div>
           </div>
         )}
 
-        {/* Middle Column: Document Canvas */}
-        <div style={{ flex: isPreviewMode ? '0 1 auto' : 1, display: 'flex', justifyContent: 'center', background: '#F9FAFB', padding: '20px', borderRadius: '16px', border: '1px solid #E5E7EB' }}>
-          {fileData ? (
-            <div style={{
-              width: '210mm',
-              height: '297mm',
-              background: 'white',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
-              position: 'relative',
-              overflowY: isPreviewMode ? 'hidden' : 'auto',
-              overflowX: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '20px'
-            }}>
-              {isPreviewMode ? (
-                <iframe
-                  src={previewPdfData || fileData}
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  title="Uploaded PDF Preview"
-                />
-              ) : (
-                pdfDoc ? (
-                  Array.from({ length: numPages }, (_, i) => i + 1).map(pageNum => (
-                    <div key={pageNum} style={{
-                      width: '100%',
-                      height: '100%',
-                      position: 'relative',
-                      overflow: 'hidden',
-                      flexShrink: 0
-                    }}>
-                      <PdfPage
-                        pdfDoc={pdfDoc}
-                        pageNum={pageNum}
-                        width={794}
-                        height={1123}
-                      />
-                    </div>
-                  ))
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF' }}>
-                    <p>Loading document pages...</p>
-                  </div>
-                )
-              )}
-            </div>
-          ) : (
-            <div style={{
-              width: '210mm',
-              height: '297mm',
-              background: 'white',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
-              position: 'relative',
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#9CA3AF'
-            }}>
-              <p>No document uploaded</p>
-            </div>
-          )}
-        </div>
-
-        {/* Actions Menu moved to Header */}
+        <DocumentCanvas
+          fileData={fileData}
+          previewPdfData={previewPdfData}
+          isPreviewMode={isPreviewMode}
+          pdfDoc={pdfDoc}
+          numPages={numPages}
+        />
 
       </div>
     </div>

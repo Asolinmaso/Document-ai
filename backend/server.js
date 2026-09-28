@@ -805,6 +805,18 @@ app.post('/api/mail/send', authenticateToken, async (req, res) => {
 
 // --- START SERVER ---
 
+// Logins fail with "Server configuration error." when this is missing, so say so at startup
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret || jwtSecret === 'your_jwt_secret_key_here') {
+  console.error(
+    '\n⚠️  JWT_SECRET is not set (or is still the placeholder). Login and every authenticated route will fail.\n' +
+    '   Generate one:  node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"\n' +
+    '   then add it as JWT_SECRET in your .env (local) or the Render service Environment tab.\n'
+  );
+} else if (jwtSecret.length < 32) {
+  console.warn('⚠️  JWT_SECRET is shorter than 32 characters; use a longer random value.');
+}
+
 initSchema()
   .then(() => {
     app.listen(PORT, () => {

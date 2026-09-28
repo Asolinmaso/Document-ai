@@ -20,6 +20,10 @@ import {
   Sparkles,
   LogOut,
   ChevronDown,
+  ChevronLeft,
+  Building2,
+  Globe,
+  Clock,
 } from 'lucide-react';
 import {
   fetchProfile,
@@ -246,10 +250,79 @@ const RecentDocuments = ({ docs, onRowClick, onDeleteDoc, onEditDoc }) => (
   </div>
 );
 
+// ── Dashboard Entry: DDC / Manvian selection ──────────────────────────────────
+
+const ENTITIES = [
+  { key: 'ddc', name: 'DDC', color: '#3B82F6', icon: <Building2 size={28} />, description: 'DDC workspace — set up coming soon.' },
+  { key: 'manvian', name: 'Manvian', color: '#6C2BD9', icon: <Globe size={28} />, description: 'Quick actions, templates and recent documents.' },
+];
+
+const DashboardEntitySelect = ({ onSelect }) => (
+  <div className="dashboard-content" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '420px', gap: '8px' }}>
+    <h2 style={{ fontSize: '22px', fontWeight: '700', color: '#111827', margin: '0 0 4px 0' }}>Choose a workspace</h2>
+    <p style={{ color: '#6B7280', fontSize: '14px', margin: '0 0 32px 0' }}>Select where you'd like to work.</p>
+    <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', justifyContent: 'center' }}>
+      {ENTITIES.map((entity) => (
+        <div
+          key={entity.key}
+          onClick={() => onSelect(entity.key)}
+          className="action-card"
+          style={{
+            width: '220px',
+            background: '#FFFFFF',
+            border: '1px solid #F3F4F6',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.04)',
+            borderRadius: '18px',
+            padding: '28px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            gap: '14px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
+          <div style={{ width: '56px', height: '56px', borderRadius: '16px', background: `${entity.color}1A`, color: entity.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {entity.icon}
+          </div>
+          <p style={{ fontWeight: '700', color: '#111827', fontSize: '17px', margin: 0 }}>{entity.name}</p>
+          <p style={{ fontSize: '12px', color: '#9CA3AF', margin: 0, lineHeight: 1.5 }}>{entity.description}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const EntityBackLink = ({ label, onBack }) => (
+  <div
+    onClick={onBack}
+    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#6C2BD9', fontSize: '13px', fontWeight: '600', cursor: 'pointer', marginBottom: '20px' }}
+  >
+    <ChevronLeft size={16} /> {label}
+  </div>
+);
+
+const DdcPlaceholder = ({ onBack }) => (
+  <div className="dashboard-content">
+    <EntityBackLink label="Switch workspace" onBack={onBack} />
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '360px', gap: '16px', textAlign: 'center' }}>
+      <div style={{ width: '64px', height: '64px', borderRadius: '18px', background: '#EFF6FF', color: '#3B82F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Clock size={30} />
+      </div>
+      <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: 0 }}>DDC — Coming soon</h3>
+      <p style={{ color: '#9CA3AF', fontSize: '14px', margin: 0, maxWidth: '360px' }}>
+        Templates and quick actions for DDC aren't available yet. Check back later.
+      </p>
+    </div>
+  </div>
+);
+
 // ── Dashboard Content (home page) ─────────────────────────────────────────────
 
-const DashboardHome = ({ docs, onActionClick, onRowClick, onDeleteDoc, onEditDoc }) => (
+const DashboardHome = ({ docs, onActionClick, onRowClick, onDeleteDoc, onEditDoc, onBack }) => (
   <div className="dashboard-content">
+    <EntityBackLink label="Switch workspace" onBack={onBack} />
     <QuickActions onActionClick={onActionClick} />
     <RecentDocuments docs={docs} onRowClick={onRowClick} onDeleteDoc={onDeleteDoc} onEditDoc={onEditDoc} />
   </div>
@@ -273,6 +346,7 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
   const [currentSubView, setCurrentSubView] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [dashboardMode, setDashboardMode] = useState(null); // null = show DDC/Manvian selector, 'ddc' | 'manvian' = chosen workspace
 
   const [profileData, setProfileData] = useState(null);
   const [companyLogos, setCompanyLogos] = useState([]);
@@ -415,6 +489,7 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
     setCurrentSubView(null);
     setSearchQuery('');
     setSelectedDoc(null);
+    setDashboardMode(null);
   };
 
   // ── Derived Data ──────────────────────────────────────────────────────────
@@ -463,7 +538,13 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
       return <EditorView doc={selectedDoc} onBack={() => setCurrentSubView(null)} logo={companyLogos[0]?.url} />;
     }
     if (currentSubView === 'template_editor') {
-      return <TemplateEditorView onBack={() => setCurrentSubView(null)} docName="Recruitment Template" />;
+      return (
+        <TemplateEditorView
+          onBack={() => setCurrentSubView(null)}
+          onSave={handleAddDocument}
+          docName="New Quotation Template"
+        />
+      );
     }
     if (currentSubView === 'quotation') {
       return (
@@ -479,6 +560,12 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
 
     switch (activeTab) {
       case 'Dashboard':
+        if (!dashboardMode) {
+          return <DashboardEntitySelect onSelect={setDashboardMode} />;
+        }
+        if (dashboardMode === 'ddc') {
+          return <DdcPlaceholder onBack={() => setDashboardMode(null)} />;
+        }
         return (
           <DashboardHome
             docs={filteredDocs.slice(0, 10)}
@@ -486,6 +573,7 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
             onRowClick={handleRowClick}
             onDeleteDoc={handleDeleteDocument}
             onEditDoc={handleEditDocument}
+            onBack={() => setDashboardMode(null)}
           />
         );
       case 'Document':

@@ -595,20 +595,23 @@ const fillHeaderFields = (page, pageLines, values, ctx) => {
       if (idx < 0) return;
       const labelItem = line.items[idx];
       const labelOnly = labelItem.str.replace(re, '').trim() === '';
-      const erase = labelOnly ? line.items.slice(idx + 1) : line.items.slice(idx);
       const size = fontSizeOf(labelItem);
 
-      erase.forEach((i) => {
-        page.drawRectangle({ x: i.transform[4] - 0.5, y: i.transform[5] - size * 0.35, width: i.width + 1, height: size * 1.5, color: rgb(ctx.banner.r, ctx.banner.g, ctx.banner.b) });
-      });
-
       const x = labelOnly ? labelItem.transform[4] + labelItem.width + fonts.main.widthOfTextAtSize(' ', size) : labelItem.transform[4];
-      let txt = safe(labelOnly ? value : `${label} ${value}`);
-      let fs = size;
+      const txt = safe(labelOnly ? value : `${label} ${value}`);
       const maxW = pageW - RIGHT_MARGIN - x;
-      while (fonts.main.widthOfTextAtSize(txt, fs) > maxW && fs > size * 0.7) fs -= 0.25;
-      while (txt.length > 6 && fonts.main.widthOfTextAtSize(txt, fs) > maxW) txt = `${txt.slice(0, -4).trimEnd()}...`;
-      page.drawText(txt, { x, y: labelItem.transform[5], size: fs, font: fonts.main, color: rgb(textRgb.r, textRgb.g, textRgb.b) });
+
+      // Long values wrap onto extra lines beneath the field at the template's own font size,
+      // instead of shrinking the font or truncating the text with "...".
+      const wrapped = wrapText(txt, fonts.main, size, maxW);
+      const lineH = size * 1.3;
+      const bandTop = labelItem.transform[5] + size * 1.15;
+      const bandBottom = labelItem.transform[5] - size * 0.4 - lineH * (wrapped.length - 1);
+      page.drawRectangle({ x: x - 0.5, y: bandBottom, width: pageW - RIGHT_MARGIN - x + 0.5, height: bandTop - bandBottom, color: rgb(ctx.banner.r, ctx.banner.g, ctx.banner.b) });
+
+      wrapped.forEach((ln, i) => {
+        page.drawText(ln, { x, y: labelItem.transform[5] - i * lineH, size, font: fonts.main, color: rgb(textRgb.r, textRgb.g, textRgb.b) });
+      });
     });
   });
 };
