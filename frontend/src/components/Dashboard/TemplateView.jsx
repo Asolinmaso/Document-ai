@@ -81,7 +81,7 @@ const TemplateView = ({ templates, onAddTemplate, onDeleteTemplate, onEditTempla
   };
 
   const categories = [
-    { name: 'Quotation', icon: <FileText size={18} color="#6C2BD9" />, subCategories: ['Recruitment', 'Technology', 'Multimedia', 'Digital Marketing'] },
+    { name: 'Quotation', icon: <FileText size={18} color="#5D1CC9" />, subCategories: ['Recruitment', 'Technology', 'Multimedia', 'Digital Marketing'] },
     { name: 'Invoice', icon: <FileText size={18} color="#EF4444" /> },
     { name: 'NDA', icon: <ShieldCheck size={18} color="#22C55E" /> },
     { name: 'MOU', icon: <FileSignature size={18} color="#3B82F6" /> },
@@ -110,7 +110,7 @@ const TemplateView = ({ templates, onAddTemplate, onDeleteTemplate, onEditTempla
           <button 
             onClick={handleAddTemplate}
             style={{ 
-              background: '#6C2BD9', 
+              background: '#5D1CC9', 
               color: 'white', 
               padding: '10px 24px', 
               borderRadius: '10px', 
@@ -187,7 +187,7 @@ const TemplateView = ({ templates, onAddTemplate, onDeleteTemplate, onEditTempla
            <span style={{ 
              display: 'inline-block', 
              background: '#F5F3FF', 
-             color: '#6C2BD9', 
+             color: '#5D1CC9', 
              padding: '6px 12px', 
              borderRadius: '6px', 
              fontSize: '13px', 
@@ -252,7 +252,7 @@ const TemplateView = ({ templates, onAddTemplate, onDeleteTemplate, onEditTempla
                   <div style={{ paddingLeft: '20px', marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     {cat.subCategories.map(sub => (
                       <div key={sub} style={{ display: 'flex', alignItems: 'center', gap: '14px', cursor: 'pointer', padding: '4px 10px' }}>
-                        <div style={{ background: '#6C2BD9', borderRadius: '6px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', boxShadow: '0 4px 8px rgba(108, 43, 217, 0.2)' }}>
+                        <div style={{ background: '#5D1CC9', borderRadius: '6px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', boxShadow: '0 4px 8px rgba(93, 28, 201, 0.2)' }}>
                            <FileText size={16} />
                         </div>
                         <span style={{ fontSize: '15px', color: '#4B5563', fontWeight: '600' }}>{sub}</span>
@@ -287,7 +287,7 @@ const TemplateView = ({ templates, onAddTemplate, onDeleteTemplate, onEditTempla
                 <tr key={i} style={{ borderBottom: i === activeCategoryTemplates.length - 1 ? 'none' : '1px solid #111827' }}>
                   <td style={{ padding: '20px 0' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ background: '#6C2BD9', color: 'white', borderRadius: '4px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ background: '#5D1CC9', color: 'white', borderRadius: '4px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                          <FileText size={16} />
                       </div>
                       <span style={{ fontWeight: '500', color: '#374151', fontSize: '14px' }}>{temp.name}</span>

@@ -41,9 +41,9 @@ const Login = ({ onSignupClick, onForgotClick, onLoginSuccess }) => {
             width: '56px',
             height: '56px',
             borderRadius: '16px',
-            background: 'linear-gradient(135deg, #6C2BD9, #4F46E5)',
+            background: 'linear-gradient(135deg, #5D1CC9, #4F46E5)',
             marginBottom: '16px',
-            boxShadow: '0 8px 20px rgba(108,43,217,0.4)',
+            boxShadow: '0 8px 20px rgba(93, 28, 201,0.4)',
           }}>
             <span style={{ fontSize: '24px' }}>📄</span>
           </div>

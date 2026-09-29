@@ -12,7 +12,7 @@ const COLORS = {
   success: { bg: '#10B981', border: '#059669' },
   error: { bg: '#EF4444', border: '#DC2626' },
   warning: { bg: '#F59E0B', border: '#D97706' },
-  info: { bg: '#6C2BD9', border: '#5B21B6' },
+  info: { bg: '#5D1CC9', border: '#5B21B6' },
 };
 
 const ToastContainer = ({ toasts, removeToast }) => {

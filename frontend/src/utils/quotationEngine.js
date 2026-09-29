@@ -588,6 +588,15 @@ const applyReplacements = (page, pageLines, replacements, ctx) => {
   late.forEach((draw) => draw(page));
 };
 
+// Company name shown after "To :" is capped so it always reads on one line at full size,
+// regardless of how long the real name is.
+const TO_FIELD_MAX_CHARS = 8;
+const truncateCompanyForToField = (name) => {
+  if (!name) return name;
+  const trimmed = name.trim();
+  return trimmed.length > TO_FIELD_MAX_CHARS ? `${trimmed.slice(0, TO_FIELD_MAX_CHARS)}...` : trimmed;
+};
+
 /** Date : / To : header lines – filled by label, so blank, placeholder and old values are all handled. */
 const fillHeaderFields = (page, pageLines, values, ctx) => {
   const { fonts, safe, pageW, bannerY, textRgb } = ctx;
@@ -596,12 +605,12 @@ const fillHeaderFields = (page, pageLines, values, ctx) => {
     // wrapping would push its second line down into (and get erased by) the field below it.
     // A short, bounded shrink keeps it on one line without touching the configured value font.
     { re: /^\s*date\s*:/i, label: 'Date :', value: values.date, allowShrink: true },
-    // The company name is the last line in the banner (nothing below it to collide with), so
-    // it keeps its full configured size and wraps instead of shrinking or truncating.
-    { re: /^\s*to\s*:/i, label: 'To :', value: values.companyName, allowShrink: false },
+    // The company name is truncated to a fixed character count so it always stays on one
+    // line at full size — it never shrinks or wraps onto extra lines.
+    { re: /^\s*to\s*:/i, label: 'To :', value: truncateCompanyForToField(values.companyName), allowShrink: false, noWrap: true },
   ];
   pageLines.filter((l) => l.y > bannerY).forEach((line) => {
-    fields.forEach(({ re, label, value, allowShrink }) => {
+    fields.forEach(({ re, label, value, allowShrink, noWrap }) => {
       if (!value) return;
       const idx = line.items.findIndex((i) => re.test(i.str));
       if (idx < 0) return;
@@ -615,7 +624,11 @@ const fillHeaderFields = (page, pageLines, values, ctx) => {
 
       let fs = size;
       let wrapped;
-      if (allowShrink) {
+      if (noWrap) {
+        // Already capped to a fixed character count: stays on one line at the template's own
+        // size, no shrinking, no wrapping.
+        wrapped = [txt];
+      } else if (allowShrink) {
         while (fonts.main.widthOfTextAtSize(txt, fs) > maxW && fs > size * 0.7) fs -= 0.25;
         wrapped = fonts.main.widthOfTextAtSize(txt, fs) <= maxW ? [txt] : wrapText(txt, fonts.main, fs, maxW);
       } else {

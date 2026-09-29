@@ -287,7 +287,7 @@ const MailCenterView = () => {
         <button 
           onClick={() => setIsComposeOpen(true)}
           style={{ 
-          background: '#6C2BD9', 
+          background: '#5D1CC9', 
           color: 'white', 
           border: 'none', 
           padding: '12px', 
@@ -296,7 +296,7 @@ const MailCenterView = () => {
           fontWeight: '600', 
           cursor: 'pointer',
           marginBottom: '32px',
-          boxShadow: '0 4px 6px rgba(108, 43, 217, 0.2)'
+          boxShadow: '0 4px 6px rgba(93, 28, 201, 0.2)'
         }}>
           Compose Email
         </button>
@@ -323,18 +323,18 @@ const MailCenterView = () => {
                   padding: '10px 16px',
                   borderRadius: '8px',
                   background: isActive ? '#F5F3FF' : 'transparent',
-                  color: isActive ? '#6C2BD9' : '#4B5563',
+                  color: isActive ? '#5D1CC9' : '#4B5563',
                   cursor: 'pointer',
                   transition: 'all 0.2s'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ color: isActive ? '#6C2BD9' : '#9CA3AF' }}>
+                  <div style={{ color: isActive ? '#5D1CC9' : '#9CA3AF' }}>
                     {folder.icon}
                   </div>
                   <span style={{ fontSize: '14px', fontWeight: isActive ? '600' : '500' }}>{folder.name}</span>
                 </div>
-                <span style={{ fontSize: '13px', fontWeight: '500', color: isActive ? '#6C2BD9' : '#9CA3AF' }}>
+                <span style={{ fontSize: '13px', fontWeight: '500', color: isActive ? '#5D1CC9' : '#9CA3AF' }}>
                   {folder.count}
                 </span>
               </div>
@@ -353,16 +353,16 @@ const MailCenterView = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                 <button 
                   onClick={() => setIsComposeOpen(false)} 
-                  style={{ background: '#6C2BD9', borderRadius: '50%', color: 'white', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', paddingRight: '2px' }}>
+                  style={{ background: '#5D1CC9', borderRadius: '50%', color: 'white', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', paddingRight: '2px' }}>
                    <ChevronLeft size={22} />
                 </button>
                 <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: 0 }}>Compose Email</h2>
               </div>
               
               <div style={{ display: 'flex', gap: '16px' }}>
-                <button onClick={() => setIsScheduleModalOpen(true)} style={{ border: '1.5px solid #6C2BD9', color: '#6C2BD9', background: 'white', padding: '10px 20px', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Schedule</button>
-                <button onClick={() => handleSend('Draft')} style={{ border: '1.5px solid #6C2BD9', color: '#6C2BD9', background: 'white', padding: '10px 20px', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Save As Draft</button>
-                <button onClick={() => handleSend('Sent')} style={{ background: '#6C2BD9', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Send Email</button>
+                <button onClick={() => setIsScheduleModalOpen(true)} style={{ border: '1.5px solid #5D1CC9', color: '#5D1CC9', background: 'white', padding: '10px 20px', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Schedule</button>
+                <button onClick={() => handleSend('Draft')} style={{ border: '1.5px solid #5D1CC9', color: '#5D1CC9', background: 'white', padding: '10px 20px', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Save As Draft</button>
+                <button onClick={() => handleSend('Sent')} style={{ background: '#5D1CC9', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Send Email</button>
               </div>
             </div>
 
@@ -380,8 +380,8 @@ const MailCenterView = () => {
                   />
                 </div>
                 <div style={{ color: '#4B5563', fontSize: '14px', display: 'flex', gap: '16px' }}>
-                   <span style={{ cursor: 'pointer', fontWeight: showCc ? '700' : '400', color: showCc ? '#6C2BD9' : '#4B5563' }} onClick={() => setShowCc(!showCc)}>Cc</span>
-                   <span style={{ cursor: 'pointer', fontWeight: showBcc ? '700' : '400', color: showBcc ? '#6C2BD9' : '#4B5563' }} onClick={() => setShowBcc(!showBcc)}>Bcc</span>
+                   <span style={{ cursor: 'pointer', fontWeight: showCc ? '700' : '400', color: showCc ? '#5D1CC9' : '#4B5563' }} onClick={() => setShowCc(!showCc)}>Cc</span>
+                   <span style={{ cursor: 'pointer', fontWeight: showBcc ? '700' : '400', color: showBcc ? '#5D1CC9' : '#4B5563' }} onClick={() => setShowBcc(!showBcc)}>Bcc</span>
                 </div>
               </div>
 
@@ -497,7 +497,7 @@ const MailCenterView = () => {
              {/* Header */}
              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '24px 32px', borderBottom: '1px solid #E5E7EB', background: '#FFFFFF' }}>
                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', color: '#111827', fontWeight: '700', fontSize: '18px' }} onClick={() => setViewingEmail(null)}>
-                 <div style={{ background: '#6C2BD9', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+                 <div style={{ background: '#5D1CC9', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
                    <ChevronLeft size={20} />
                  </div>
                  Back
@@ -516,7 +516,7 @@ const MailCenterView = () => {
                {/* Sender Info */}
                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
                  <div style={{ display: 'flex', gap: '16px' }}>
-                   <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#6C2BD9', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: '600' }}>
+                   <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#5D1CC9', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: '600' }}>
                      {viewingEmail.sender ? viewingEmail.sender.substring(0, 2).toUpperCase() : 'ME'}
                    </div>
                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -597,7 +597,7 @@ const MailCenterView = () => {
                   
                   <button 
                     onClick={handleRestoreSelected}
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', border: '1.5px solid #6C2BD9', background: 'white', color: '#6C2BD9', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', border: '1.5px solid #5D1CC9', background: 'white', color: '#5D1CC9', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
                   >
                     <RotateCcw size={16} /> Restore Selected
                   </button>
@@ -688,7 +688,7 @@ const MailCenterView = () => {
                     type="checkbox" 
                     checked={selectedEmailIds.includes(email.id)}
                     onChange={(e) => { e.stopPropagation(); toggleSelection(email.id); }}
-                    style={{ marginRight: '20px', width: '16px', height: '16px', accentColor: '#6C2BD9', cursor: 'pointer' }} 
+                    style={{ marginRight: '20px', width: '16px', height: '16px', accentColor: '#5D1CC9', cursor: 'pointer' }} 
                   />
                   
                   <div style={{ width: '180px', flexShrink: 0, fontSize: '14px', fontWeight: '600', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: '16px' }}>
@@ -703,7 +703,7 @@ const MailCenterView = () => {
                     <div style={{ display: 'flex', gap: '16px', alignItems: 'center', color: '#6B7280', width: '80px', justifyContent: 'flex-end' }}>
                       <RotateCcw 
                         onClick={(e) => { e.stopPropagation(); handleRestore(email.id); }}
-                        size={18} style={{ color: '#6C2BD9', cursor: 'pointer' }} 
+                        size={18} style={{ color: '#5D1CC9', cursor: 'pointer' }} 
                       />
                       <Trash2 
                         onClick={(e) => { e.stopPropagation(); handlePermanentDelete(email.id); }}
@@ -774,7 +774,7 @@ const MailCenterView = () => {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px', marginTop: '40px' }}>
               <button 
                 onClick={() => setIsScheduleModalOpen(false)}
-                style={{ padding: '10px 24px', border: '1.5px solid #6C2BD9', borderRadius: '8px', background: 'white', color: '#6C2BD9', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}
+                style={{ padding: '10px 24px', border: '1.5px solid #5D1CC9', borderRadius: '8px', background: 'white', color: '#5D1CC9', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}
               >
                 Cancel
               </button>
@@ -783,7 +783,7 @@ const MailCenterView = () => {
                   handleSend('Scheduled');
                   setIsScheduleModalOpen(false);
                 }}
-                style={{ padding: '10px 24px', border: 'none', borderRadius: '8px', background: '#6C2BD9', color: 'white', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}
+                style={{ padding: '10px 24px', border: 'none', borderRadius: '8px', background: '#5D1CC9', color: 'white', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}
               >
                 Schedule
               </button>

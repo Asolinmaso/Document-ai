@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { 
+import {
   ArrowLeft,
   FileText,
   Trash2,
   Edit,
+  History,
   X
 } from 'lucide-react';
 
@@ -104,7 +105,7 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
               border: '2px solid transparent',
               transition: 'all 0.2s'
             }}
-            onMouseOver={e => e.currentTarget.style.borderColor = '#6C2BD9'}
+            onMouseOver={e => e.currentTarget.style.borderColor = '#5D1CC9'}
             onMouseOut={e => e.currentTarget.style.borderColor = 'transparent'}
           >
             <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>Use Previous Template</h3>
@@ -122,15 +123,15 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
               alignItems: 'center',
               gap: '14px'
             }}>
-              <div style={{ background: '#6C2BD9', borderRadius: '6px', padding: '8px', color: 'white', display: 'flex' }}>
+              <div style={{ background: '#5D1CC9', borderRadius: '6px', padding: '8px', color: 'white', display: 'flex' }}>
                 <FileText size={20} />
               </div>
               <div style={{ flex: 1 }}>
                 <p style={{ fontSize: '13px', fontWeight: '600', color: '#111827', margin: 0 }}>{latestDoc ? latestDoc.name : 'No Previous Template'}</p>
                 <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0 }}>{latestDoc ? `Modified ${latestDoc.edited}` : 'Create your first template'}</p>
               </div>
-              <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: '2px solid #6C2BD9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#6C2BD9' }}></div>
+              <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: '2px solid #5D1CC9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#5D1CC9' }}></div>
               </div>
             </div>
 
@@ -138,7 +139,7 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
               marginTop: 'auto', 
               background: 'none', 
               border: 'none', 
-              color: '#6C2BD9', 
+              color: '#5D1CC9', 
               fontSize: '13px', 
               fontWeight: '600', 
               cursor: 'pointer',
@@ -164,7 +165,7 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
               border: '2px solid transparent',
               transition: 'all 0.2s'
             }}
-            onMouseOver={e => e.currentTarget.style.borderColor = '#6C2BD9'}
+            onMouseOver={e => e.currentTarget.style.borderColor = '#5D1CC9'}
             onMouseOut={e => e.currentTarget.style.borderColor = 'transparent'}
           >
             <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>Create New Template</h3>
@@ -182,14 +183,14 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
               <div style={{ 
                 width: '70px', 
                 height: '90px', 
-                background: '#6C2BD9', 
+                background: '#5D1CC9', 
                 borderRadius: '8px', 
                 position: 'relative',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: 'white',
-                boxShadow: '0 12px 20px -5px rgba(108, 43, 217, 0.3)'
+                boxShadow: '0 12px 20px -5px rgba(93, 28, 201, 0.3)'
               }}>
                 <FileText size={40} />
                 <div style={{ 
@@ -203,7 +204,7 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
                   display: 'flex', 
                   alignItems: 'center', 
                   justifyContent: 'center',
-                  color: '#6C2BD9',
+                  color: '#5D1CC9',
                   boxShadow: '0 4px 10px rgba(0, 0, 0, 0.12)',
                   border: '1.5px solid #F3F4F6'
                 }}>
@@ -216,7 +217,7 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
               marginTop: 'auto', 
               background: 'none', 
               border: 'none', 
-              color: '#6C2BD9', 
+              color: '#5D1CC9', 
               fontSize: '13px', 
               fontWeight: '600', 
               cursor: 'pointer',
@@ -234,11 +235,11 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
   );
 };
 
-const QuotationView = ({ onBack, onSelectTemplate, onCreateNewTemplate, docs = [] }) => {
+const QuotationView = ({ onBack, onSelectTemplate, onCreateNewTemplate, onOpenHistory, onDeleteDoc, docs = [] }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const types = [
-    { name: 'Recruitment', color: '#6C2BD9' },
+    { name: 'Recruitment', color: '#5D1CC9' },
     { name: 'Technology', color: '#EF4444' },
     { name: 'Multimedia', color: '#22C55E' },
     { name: 'Digital Marketing', color: '#3B82F6' },
@@ -261,19 +262,37 @@ const QuotationView = ({ onBack, onSelectTemplate, onCreateNewTemplate, docs = [
           style={{ 
             width: '32px', 
             height: '32px', 
-            background: '#6C2BD9', 
+            background: '#5D1CC9', 
             borderRadius: '50%', 
             display: 'flex', 
             alignItems: 'center', 
             justifyContent: 'center', 
             color: 'white', 
             cursor: 'pointer',
-            boxShadow: '0 4px 10px rgba(108, 43, 217, 0.3)'
+            boxShadow: '0 4px 10px rgba(93, 28, 201, 0.3)'
           }}
         >
           <ArrowLeft size={18} />
         </div>
-        <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: 0 }}>Select Quotation Type</h2>
+        <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: 0, flex: 1 }}>Select Quotation Type</h2>
+        <button
+          onClick={onOpenHistory}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: 'white',
+            border: '1.5px solid #E5E7EB',
+            color: '#5D1CC9',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            fontSize: '13px',
+            fontWeight: '600',
+            cursor: 'pointer'
+          }}
+        >
+          <History size={16} /> History
+        </button>
       </div>
 
       {/* Quotation Types Grid */}
@@ -322,10 +341,10 @@ const QuotationView = ({ onBack, onSelectTemplate, onCreateNewTemplate, docs = [
             </thead>
             <tbody>
               {docs.map((doc, i) => (
-                <tr key={i} style={{ borderBottom: i === docs.length - 1 ? 'none' : '1px solid #111827', cursor: 'pointer' }} onClick={() => onSelectTemplate()}>
+                <tr key={doc.id || i} style={{ borderBottom: i === docs.length - 1 ? 'none' : '1px solid #111827', cursor: 'pointer' }} onClick={() => onSelectTemplate(doc)}>
                   <td style={{ padding: '20px 0' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ background: '#6C2BD9', color: 'white', borderRadius: '4px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ background: '#5D1CC9', color: 'white', borderRadius: '4px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                          <FileText size={16} />
                       </div>
                       <span style={{ fontWeight: '500', color: '#111827', fontSize: '14px' }}>{doc.name}</span>
@@ -333,10 +352,10 @@ const QuotationView = ({ onBack, onSelectTemplate, onCreateNewTemplate, docs = [
                   </td>
                   <td style={{ padding: '20px 0', color: '#4B5563', fontSize: '14px' }}>{doc.type}</td>
                   <td style={{ padding: '20px 0', color: '#4B5563', fontSize: '14px' }}>{doc.edited}</td>
-                  <td style={{ padding: '20px 0', textAlign: 'right' }}>
+                  <td style={{ padding: '20px 0', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                      <button style={{ background: 'none', border: '1.5px solid #E5E7EB', borderRadius: '6px', padding: '6px', color: '#9CA3AF', cursor: 'pointer' }}><Trash2 size={18} /></button>
-                      <button style={{ background: 'none', border: '1.5px solid #E5E7EB', borderRadius: '6px', padding: '6px', color: '#9CA3AF', cursor: 'pointer' }}><Edit size={18} /></button>
+                      <button onClick={() => onDeleteDoc && onDeleteDoc(doc.id)} title="Move to trash" style={{ background: 'none', border: '1.5px solid #E5E7EB', borderRadius: '6px', padding: '6px', color: '#9CA3AF', cursor: 'pointer' }}><Trash2 size={18} /></button>
+                      <button onClick={() => onSelectTemplate(doc)} title="Edit" style={{ background: 'none', border: '1.5px solid #E5E7EB', borderRadius: '6px', padding: '6px', color: '#9CA3AF', cursor: 'pointer' }}><Edit size={18} /></button>
                     </div>
                   </td>
                 </tr>

@@ -1,8 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
 
 :root {
-  --primary: #6C2BD9;
-  --primary-hover: #5B21B6;
+  --primary: #5D1CC9;
+  --primary-hover: #4A16A3;
   --bg-dark: #09021A;
   --bg-gradient: radial-gradient(circle at top left, #1A0B3B 0%, #09021A 100%);
   --glass: rgba(255, 255, 255, 0.05);
@@ -182,7 +182,7 @@ h1, h2, h3, h4, .logo {
   cursor: pointer;
   transition: var(--transition);
   margin-top: 10px;
-  box-shadow: 0 4px 15px rgba(108, 43, 217, 0.3);
+  box-shadow: 0 4px 15px rgba(93, 28, 201, 0.3);
 }
 
 .btn-primary:hover {

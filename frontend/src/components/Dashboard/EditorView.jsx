@@ -160,10 +160,8 @@ const EditorToolbar = memo(({ fontFamily, setFontFamily, fontSize, setFontSize, 
   }}>
     <div style={{ paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
       <select value={fontFamily} onChange={(e) => setFontFamily(e.target.value)} style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: '500', outline: 'none', color: '#4B5563', cursor: 'pointer' }}>
-        <option value="Montserrat">Montserrat</option>
-        <option value="Inter">Inter</option>
-        <option value="Arial">Arial</option>
-        <option value="Times New Roman">Times New Roman</option>
+        <option value="Helvetica">Helvetica (Sans)</option>
+        <option value="Times New Roman">Times New Roman (Serif)</option>
       </select>
     </div>
     <div style={{ paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
@@ -174,9 +172,9 @@ const EditorToolbar = memo(({ fontFamily, setFontFamily, fontSize, setFontSize, 
       </select>
     </div>
     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
-      <Bold size={16} cursor="pointer" color={isBold ? '#6C2BD9' : '#4B5563'} onClick={() => setIsBold(!isBold)} />
-      <Italic size={16} cursor="pointer" color={isItalic ? '#6C2BD9' : '#4B5563'} onClick={() => setIsItalic(!isItalic)} />
-      <Underline size={16} cursor="pointer" color={isUnderline ? '#6C2BD9' : '#4B5563'} onClick={() => setIsUnderline(!isUnderline)} />
+      <Bold size={16} cursor="pointer" color={isBold ? '#5D1CC9' : '#4B5563'} onClick={() => setIsBold(!isBold)} />
+      <Italic size={16} cursor="pointer" color={isItalic ? '#5D1CC9' : '#4B5563'} onClick={() => setIsItalic(!isItalic)} />
+      <Underline size={16} cursor="pointer" color={isUnderline ? '#5D1CC9' : '#4B5563'} onClick={() => setIsUnderline(!isUnderline)} />
       <Strikethrough size={16} cursor="pointer" color="#4B5563" />
       <div style={{ display: 'flex', alignItems: 'center', gap: '2px', position: 'relative' }}>
         <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} style={{ opacity: 0, position: 'absolute', width: '100%', height: '100%', cursor: 'pointer' }} title="Change Text Color" />
@@ -254,7 +252,7 @@ const PositionForm = memo(({ initialValues, isEditing, onSubmit, onCancel }) => 
           )}
           <button
             onClick={submit}
-            style={{ background: '#6C2BD9', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}
+            style={{ background: '#5D1CC9', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}
           >
             {isEditing ? 'Update' : 'Add'}
           </button>
@@ -268,7 +266,7 @@ const PositionsList = memo(({ positions, editingId, onEdit, onDelete }) => {
   if (positions.length === 0) return null;
   return (
     <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-      <h4 style={{ fontSize: '12px', fontWeight: '700', color: '#6C2BD9', margin: '0 0 8px 0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Added Positions</h4>
+      <h4 style={{ fontSize: '12px', fontWeight: '700', color: '#5D1CC9', margin: '0 0 8px 0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Added Positions</h4>
 
       <div style={{
         display: 'grid',
@@ -309,7 +307,7 @@ const PositionsList = memo(({ positions, editingId, onEdit, onDelete }) => {
               onClick={() => onEdit(pos)}
               title="Edit Position"
               aria-label="Edit Position"
-              style={{ padding: '3px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: pos.id === editingId ? '#6C2BD9' : '#9CA3AF' }}
+              style={{ padding: '3px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: pos.id === editingId ? '#5D1CC9' : '#9CA3AF' }}
             >
               <Edit size={13} />
             </button>
@@ -331,7 +329,7 @@ const PositionsList = memo(({ positions, editingId, onEdit, onDelete }) => {
   );
 });
 
-const EditorView = ({ onBack, doc, logo }) => {
+const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
   const fileName = doc ? doc.name : "Recruitment Quotation";
   const docType = doc ? doc.type : "Quotation";
   const fileData = doc ? doc.file : null;
@@ -393,13 +391,17 @@ const EditorView = ({ onBack, doc, logo }) => {
   const [totalRequirements, setTotalRequirements] = useState(() => loadInitialState('totalRequirements', ''));
   const [replacementGuarantee, setReplacementGuarantee] = useState(() => loadInitialState('replacementGuarantee', ''));
   const [serviceFee, setServiceFee] = useState(() => loadInitialState('serviceFee', ''));
+  const [advanceAmount, setAdvanceAmount] = useState(() => loadInitialState('advanceAmount', ''));
+  // The document's own name — editable independently of the PDF fill pipeline below, so typing
+  // here never waits on (or gets interrupted by) the debounced preview regeneration.
+  const [docName, setDocName] = useState(() => loadInitialState('docName', fileName));
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   const [positions, setPositions] = useState(() => loadInitialState('positions', []));
   const [editingPositionId, setEditingPositionId] = useState(null);
 
   // Toolbar State
-  const [fontFamily, setFontFamily] = useState(() => loadInitialState('fontFamily', 'Montserrat'));
+  const [fontFamily, setFontFamily] = useState(() => loadInitialState('fontFamily', 'Helvetica'));
   const [fontSize, setFontSize] = useState(() => loadInitialState('fontSize', 16));
   const [isBold, setIsBold] = useState(() => loadInitialState('isBold', true));
   const [isItalic, setIsItalic] = useState(() => loadInitialState('isItalic', false));
@@ -411,12 +413,12 @@ const EditorView = ({ onBack, doc, logo }) => {
   // Persisted to localStorage ~400ms after the user stops changing anything, instead of on
   // every keystroke — avoids a synchronous JSON.stringify + write on each character typed.
   useEffect(() => {
-    const stateToSave = { date: date || undefined, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
+    const stateToSave = { date: date || undefined, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
     const timer = setTimeout(() => {
       try { localStorage.setItem(storageKey, JSON.stringify(stateToSave)); } catch { /* storage full or blocked */ }
     }, 400);
     return () => clearTimeout(timer);
-  }, [storageKey, date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
+  }, [storageKey, date, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
 
   // Template analysis: text lines, table grid and banner colour are measured once per uploaded PDF
   const [analysis, setAnalysis] = useState(null);
@@ -558,6 +560,52 @@ const EditorView = ({ onBack, doc, logo }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis, date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, textColor, fontFamily, isBold, isItalic]);
 
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Persists the form's current values to the document record on the server (not just
+  // localStorage), so drafts/history survive across browsers and devices.
+  const handleSave = useCallback(async (status) => {
+    if (!doc || !onSaveQuotation) {
+      showToast?.('Nothing to save yet — upload or open a document first.', 'warning');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const dataUrl = analysis ? await generatePreview(true) : null;
+      const quotationData = { date, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions, fontFamily, isBold, isItalic, textColor };
+      await onSaveQuotation(doc.id, {
+        name: docName,
+        status,
+        quotationData,
+        ...(dataUrl ? { file: dataUrl } : {}),
+      });
+      showToast?.(status === 'draft' ? 'Saved as draft.' : 'Quotation updated.', 'success');
+    } catch (err) {
+      console.error('Failed to save quotation:', err);
+      showToast?.('Failed to save. Please try again.', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, onSaveQuotation, showToast, analysis, date, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions, fontFamily, isBold, isItalic, textColor, docName]);
+
+  // A shareable link re-opens this exact document (the app is a single-page state machine, so
+  // the link carries the document id as a query param that App/Dashboard read on load).
+  const handleCopyLink = useCallback(async () => {
+    if (!doc) {
+      showToast?.('Nothing to link to yet.', 'warning');
+      return;
+    }
+    const url = `${window.location.origin}${window.location.pathname}?docId=${doc.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast?.('Link copied to clipboard!', 'success');
+    } catch (err) {
+      console.error('Failed to copy link:', err);
+      showToast?.('Could not copy the link. Please copy it manually.', 'error');
+    }
+  }, [doc, showToast]);
+
   // Position CRUD: stable identities so PositionsList (memoized) doesn't re-render just
   // because EditorView re-rendered for an unrelated reason.
   const handleSubmitPosition = useCallback((values) => {
@@ -603,7 +651,7 @@ const EditorView = ({ onBack, doc, logo }) => {
         <button
           onClick={onBack}
           style={{
-            background: '#6C2BD9',
+            background: '#5D1CC9',
             border: 'none',
             color: 'white',
             cursor: 'pointer',
@@ -613,7 +661,7 @@ const EditorView = ({ onBack, doc, logo }) => {
             justifyContent: 'center',
             width: '32px',
             height: '32px',
-            boxShadow: '0 2px 4px rgba(108, 43, 217, 0.2)'
+            boxShadow: '0 2px 4px rgba(93, 28, 201, 0.2)'
           }}
         >
           <ArrowLeft size={18} />
@@ -627,22 +675,29 @@ const EditorView = ({ onBack, doc, logo }) => {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
           <span style={{ fontSize: '14px', fontWeight: '700', color: '#111827', paddingBottom: '2px' }}>Name :</span>
-          <span style={{
-            fontSize: '14px',
-            fontWeight: '500',
-            color: '#6B7280',
-            borderBottom: '1px solid #6B7280',
-            paddingBottom: '2px',
-            minWidth: '220px'
-          }}>
-            {fileName}
-          </span>
+          <input
+            type="text"
+            value={docName}
+            onChange={(e) => setDocName(e.target.value)}
+            placeholder="Document name"
+            style={{
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#111827',
+              border: 'none',
+              borderBottom: '1px solid #6B7280',
+              paddingBottom: '2px',
+              minWidth: '220px',
+              outline: 'none',
+              background: 'transparent'
+            }}
+          />
         </div>
         <div style={{ display: 'flex', gap: '12px', position: 'relative' }}>
           <button onClick={() => setIsPreviewMode(!isPreviewMode)} style={{
-            background: isPreviewMode ? '#6C2BD9' : 'white',
-            border: isPreviewMode ? '1.5px solid #6C2BD9' : '1.5px solid #E5E7EB',
-            color: isPreviewMode ? 'white' : '#6C2BD9',
+            background: isPreviewMode ? '#5D1CC9' : 'white',
+            border: isPreviewMode ? '1.5px solid #5D1CC9' : '1.5px solid #E5E7EB',
+            color: isPreviewMode ? 'white' : '#5D1CC9',
             padding: '8px 20px',
             borderRadius: '8px',
             fontSize: '13px',
@@ -654,7 +709,7 @@ const EditorView = ({ onBack, doc, logo }) => {
           <button onClick={() => setShowMoreMenu(!showMoreMenu)} style={{
             background: 'white',
             border: '1.5px solid #E5E7EB',
-            color: '#6C2BD9',
+            color: '#5D1CC9',
             padding: '8px 16px',
             borderRadius: '8px',
             fontSize: '13px',
@@ -681,14 +736,14 @@ const EditorView = ({ onBack, doc, logo }) => {
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
               zIndex: 10
             }}>
-              <div onClick={() => { setShowMoreMenu(false); handleDownloadPdf(); }} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', color: isDownloading ? '#9CA3AF' : '#6C2BD9', fontWeight: '600', fontSize: '13px', cursor: isDownloading ? 'default' : 'pointer' }}>
+              <div onClick={() => { setShowMoreMenu(false); handleDownloadPdf(); }} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', color: isDownloading ? '#9CA3AF' : '#5D1CC9', fontWeight: '600', fontSize: '13px', cursor: isDownloading ? 'default' : 'pointer' }}>
                 {isDownloading ? 'Preparing PDF…' : 'Download as PDF'}
               </div>
-              <div onClick={() => { navigator.clipboard.writeText(window.location.href); alert('Link copied to clipboard!'); setShowMoreMenu(false); }} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', color: '#6C2BD9', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
+              <div onClick={() => { setShowMoreMenu(false); handleCopyLink(); }} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', color: '#5D1CC9', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
                 Copy Link
               </div>
-              <div onClick={() => { alert('Document saved as draft!'); setShowMoreMenu(false); }} style={{ padding: '12px 16px', color: '#6C2BD9', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
-                Save As Draft
+              <div onClick={() => { setShowMoreMenu(false); handleSave('draft'); }} style={{ padding: '12px 16px', color: isSaving ? '#9CA3AF' : '#5D1CC9', fontWeight: '600', fontSize: '13px', cursor: isSaving ? 'default' : 'pointer' }}>
+                {isSaving ? 'Saving…' : 'Save As Draft'}
               </div>
             </div>
           )}
@@ -751,7 +806,7 @@ const EditorView = ({ onBack, doc, logo }) => {
                     onChange={e => setDate(e.target.value)}
                     placeholder="e.g. JUNE 19,2026"
                     title="Auto-filled from date picker above. You can also edit manually."
-                    style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid #E5E7EB', outline: 'none', fontSize: '11px', color: '#6C2BD9', fontWeight: '600', background: '#F5F3FF' }}
+                    style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid #E5E7EB', outline: 'none', fontSize: '11px', color: '#5D1CC9', fontWeight: '600', background: '#F5F3FF' }}
                   />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -768,26 +823,6 @@ const EditorView = ({ onBack, doc, logo }) => {
                   <label style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>Total Position Requirements :</label>
                   <input type="text" value={totalRequirements} onChange={e => setTotalRequirements(e.target.value)} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px' }} />
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>Replacement Guarantee :</label>
-                  <input
-                    type="text"
-                    value={replacementGuarantee}
-                    onChange={e => setReplacementGuarantee(e.target.value)}
-                    placeholder="e.g. 3 months"
-                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px' }}
-                  />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>Service Fee Percentage (%) :</label>
-                  <input
-                    type="text"
-                    value={serviceFee}
-                    onChange={e => setServiceFee(e.target.value)}
-                    placeholder="e.g. 8.33"
-                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px' }}
-                  />
-                </div>
 
                 <PositionForm
                   key={editingPositionId || 'new'}
@@ -803,6 +838,57 @@ const EditorView = ({ onBack, doc, logo }) => {
                   onEdit={handleEditPosition}
                   onDelete={handleDeletePosition}
                 />
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>Service Fee % :</label>
+                  <input
+                    type="text"
+                    value={serviceFee}
+                    onChange={e => setServiceFee(e.target.value)}
+                    placeholder="e.g. 8.33"
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>Replacement Guarantee :</label>
+                  <input
+                    type="text"
+                    value={replacementGuarantee}
+                    onChange={e => setReplacementGuarantee(e.target.value)}
+                    placeholder="e.g. 3 months"
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>Advance Amount In Rs :</label>
+                  <input
+                    type="text"
+                    value={advanceAmount}
+                    onChange={e => setAdvanceAmount(e.target.value)}
+                    placeholder="e.g. 5000"
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px' }}
+                  />
+                </div>
+
+                <button
+                  onClick={() => handleSave(doc?.status === 'draft' ? 'draft' : 'active')}
+                  disabled={isSaving}
+                  style={{
+                    alignSelf: 'flex-end',
+                    background: '#5D1CC9',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '10px 24px',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: isSaving ? 'default' : 'pointer',
+                    opacity: isSaving ? 0.7 : 1,
+                    marginTop: '4px'
+                  }}
+                >
+                  {isSaving ? 'Updating…' : 'Update Data'}
+                </button>
               </div>
             </div>
           </div>

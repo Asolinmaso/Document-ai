@@ -136,7 +136,7 @@ const ProfileView = ({ savedData, onUpdateProfile, companyLogos = [], onUpdateLo
           <div
             onClick={() => assetFileInputRef.current?.click()}
             title="Upload logo"
-            style={{ position: 'absolute', bottom: '2px', right: '2px', background: '#6C2BD9', color: 'white', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '2px solid white' }}
+            style={{ position: 'absolute', bottom: '2px', right: '2px', background: '#5D1CC9', color: 'white', width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '2px solid white' }}
           >
             <Camera size={12} />
           </div>
@@ -165,11 +165,11 @@ const ProfileView = ({ savedData, onUpdateProfile, companyLogos = [], onUpdateLo
                 border: 'none',
                 fontSize: '14px',
                 fontWeight: activeTab === tab ? '700' : '500',
-                color: activeTab === tab ? '#6C2BD9' : '#6B7280',
+                color: activeTab === tab ? '#5D1CC9' : '#6B7280',
                 cursor: 'pointer',
                 padding: '10px 0',
                 marginBottom: '-2px',
-                borderBottom: activeTab === tab ? '2px solid #6C2BD9' : '2px solid transparent',
+                borderBottom: activeTab === tab ? '2px solid #5D1CC9' : '2px solid transparent',
                 transition: 'all 0.2s',
               }}
             >
@@ -195,7 +195,7 @@ const ProfileView = ({ savedData, onUpdateProfile, companyLogos = [], onUpdateLo
                   value={editData[field.key]}
                   onChange={(e) => handleInputChange(field.key, e.target.value)}
                   style={inputStyle}
-                  onFocus={(e) => { e.target.style.borderColor = '#6C2BD9'; e.target.style.background = 'white'; e.target.style.boxShadow = '0 0 0 3px rgba(108,43,217,0.1)'; }}
+                  onFocus={(e) => { e.target.style.borderColor = '#5D1CC9'; e.target.style.background = 'white'; e.target.style.boxShadow = '0 0 0 3px rgba(93, 28, 201,0.1)'; }}
                   onBlur={(e) => { e.target.style.borderColor = '#D1D5DB'; e.target.style.background = '#F9FAFB'; e.target.style.boxShadow = 'none'; }}
                 />
               </div>
@@ -206,7 +206,7 @@ const ProfileView = ({ savedData, onUpdateProfile, companyLogos = [], onUpdateLo
             <button
               onClick={handleSave}
               disabled={saving}
-              style={{ background: saving ? '#A78BFA' : '#6C2BD9', color: 'white', padding: '12px 40px', borderRadius: '10px', fontSize: '14px', fontWeight: '600', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(108,43,217,0.25)', transition: 'all 0.2s' }}
+              style={{ background: saving ? '#A78BFA' : '#5D1CC9', color: 'white', padding: '12px 40px', borderRadius: '10px', fontSize: '14px', fontWeight: '600', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(93, 28, 201,0.25)', transition: 'all 0.2s' }}
             >
               <Save size={16} />
               {saving ? 'Saving…' : 'Save Changes'}
@@ -241,7 +241,7 @@ const ProfileView = ({ savedData, onUpdateProfile, companyLogos = [], onUpdateLo
               </div>
               <button
                 onClick={handleAddAssetClick}
-                style={{ background: '#6C2BD9', color: 'white', padding: '9px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                style={{ background: '#5D1CC9', color: 'white', padding: '9px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
               >
                 <Plus size={14} /> Add {activeAssetSubTab.slice(0, -1)}
               </button>
@@ -269,10 +269,10 @@ const ProfileView = ({ savedData, onUpdateProfile, companyLogos = [], onUpdateLo
               <div
                 onClick={handleAddAssetClick}
                 style={{ background: 'white', borderRadius: '12px', border: '2px dashed #D1D5DB', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', cursor: 'pointer', minHeight: '170px', transition: 'all 0.2s' }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#6C2BD9'; e.currentTarget.style.background = '#F5F3FF'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#5D1CC9'; e.currentTarget.style.background = '#F5F3FF'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#D1D5DB'; e.currentTarget.style.background = 'white'; }}
               >
-                <div style={{ width: '36px', height: '36px', borderRadius: '50%', border: '2px solid #6C2BD9', color: '#6C2BD9', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '10px' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '50%', border: '2px solid #5D1CC9', color: '#5D1CC9', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '10px' }}>
                   <Plus size={20} />
                 </div>
                 <p style={{ fontSize: '12px', fontWeight: '600', color: '#374151', margin: '0 0 4px' }}>Add {activeAssetSubTab.slice(0, -1)}</p>

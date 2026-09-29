@@ -427,7 +427,7 @@ app.post('/api/logos', authenticateToken, async (req, res) => {
 
 app.get('/api/documents', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM documents ORDER BY id DESC');
+    const result = await pool.query('SELECT *, quotation_data AS "quotationData" FROM documents ORDER BY id DESC');
     res.json(result.rows);
   } catch (error) {
     console.error('Failed to read documents:', error);
@@ -437,15 +437,14 @@ app.get('/api/documents', authenticateToken, async (req, res) => {
 
 app.post('/api/documents', authenticateToken, async (req, res) => {
   try {
-    const { name, type, edited, file } = req.body;
+    const { name, type, edited, file, status, quotationData } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Document name is required.' });
 
     const id = Date.now();
-    const status = 'active';
 
     const result = await pool.query(
-      'INSERT INTO documents (id, name, type, edited, file, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [id, name.trim(), type || '', edited || new Date().toLocaleDateString(), file || '', status]
+      'INSERT INTO documents (id, name, type, edited, file, status, quotation_data) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *, quotation_data AS "quotationData"',
+      [id, name.trim(), type || '', edited || new Date().toLocaleDateString(), file || '', status || 'active', JSON.stringify(quotationData || {})]
     );
 
     res.status(201).json(result.rows[0]);
@@ -473,15 +472,21 @@ app.put('/api/documents/:id', authenticateToken, async (req, res) => {
       }
     }
 
+    if (req.body.quotationData !== undefined) {
+      fields.push(`quotation_data = $${valIdx}`);
+      values.push(JSON.stringify(req.body.quotationData || {}));
+      valIdx++;
+    }
+
     if (fields.length === 0) {
-      const getRes = await pool.query('SELECT * FROM documents WHERE id = $1', [docId]);
+      const getRes = await pool.query('SELECT *, quotation_data AS "quotationData" FROM documents WHERE id = $1', [docId]);
       return getRes.rowCount > 0
         ? res.json(getRes.rows[0])
         : res.status(404).json({ error: 'Document not found.' });
     }
 
     values.push(docId);
-    const query = `UPDATE documents SET ${fields.join(', ')} WHERE id = $${valIdx} RETURNING *`;
+    const query = `UPDATE documents SET ${fields.join(', ')} WHERE id = $${valIdx} RETURNING *, quotation_data AS "quotationData"`;
     const result = await pool.query(query, values);
 
     if (result.rowCount > 0) {

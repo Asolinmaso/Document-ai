@@ -52,7 +52,7 @@ const WidgetPalette = ({ onAdd }) => (
             background: 'white', border: '1px solid #E5E7EB', borderRadius: '10px',
             fontSize: '13px', fontWeight: '600', color: '#374151', cursor: 'pointer', textAlign: 'left',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#6C2BD9'; e.currentTarget.style.color = '#6C2BD9'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#5D1CC9'; e.currentTarget.style.color = '#5D1CC9'; }}
           onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#E5E7EB'; e.currentTarget.style.color = '#374151'; }}
         >
           <Icon size={16} />
@@ -142,13 +142,13 @@ const PropertiesPanel = ({ element, onUpdate, onDelete, onDuplicate, onUploadIma
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Bold size={16} cursor="pointer" color={element.bold ? '#6C2BD9' : '#9CA3AF'} onClick={() => onUpdate({ bold: !element.bold })} />
-            <Italic size={16} cursor="pointer" color={element.italic ? '#6C2BD9' : '#9CA3AF'} onClick={() => onUpdate({ italic: !element.italic })} />
-            <Underline size={16} cursor="pointer" color={element.underline ? '#6C2BD9' : '#9CA3AF'} onClick={() => onUpdate({ underline: !element.underline })} />
+            <Bold size={16} cursor="pointer" color={element.bold ? '#5D1CC9' : '#9CA3AF'} onClick={() => onUpdate({ bold: !element.bold })} />
+            <Italic size={16} cursor="pointer" color={element.italic ? '#5D1CC9' : '#9CA3AF'} onClick={() => onUpdate({ italic: !element.italic })} />
+            <Underline size={16} cursor="pointer" color={element.underline ? '#5D1CC9' : '#9CA3AF'} onClick={() => onUpdate({ underline: !element.underline })} />
             <span style={{ width: '1px', height: '16px', background: '#E5E7EB' }} />
-            <AlignLeft size={16} cursor="pointer" color={element.align === 'left' || !element.align ? '#6C2BD9' : '#9CA3AF'} onClick={() => onUpdate({ align: 'left' })} />
-            <AlignCenter size={16} cursor="pointer" color={element.align === 'center' ? '#6C2BD9' : '#9CA3AF'} onClick={() => onUpdate({ align: 'center' })} />
-            <AlignRight size={16} cursor="pointer" color={element.align === 'right' ? '#6C2BD9' : '#9CA3AF'} onClick={() => onUpdate({ align: 'right' })} />
+            <AlignLeft size={16} cursor="pointer" color={element.align === 'left' || !element.align ? '#5D1CC9' : '#9CA3AF'} onClick={() => onUpdate({ align: 'left' })} />
+            <AlignCenter size={16} cursor="pointer" color={element.align === 'center' ? '#5D1CC9' : '#9CA3AF'} onClick={() => onUpdate({ align: 'center' })} />
+            <AlignRight size={16} cursor="pointer" color={element.align === 'right' ? '#5D1CC9' : '#9CA3AF'} onClick={() => onUpdate({ align: 'right' })} />
           </div>
         </>
       )}
@@ -196,7 +196,7 @@ const WidgetBox = ({ element, isSelected, onPointerDown, onSelect }) => {
     width: element.width,
     height: element.height,
     cursor: 'move',
-    outline: isSelected ? '2px solid #6C2BD9' : '1px dashed transparent',
+    outline: isSelected ? '2px solid #5D1CC9' : '1px dashed transparent',
     outlineOffset: '2px',
     boxSizing: 'border-box',
   };
@@ -384,7 +384,7 @@ const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template'
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
           <button
             onClick={onBack}
-            style={{ background: '#6C2BD9', border: 'none', color: 'white', cursor: 'pointer', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', boxShadow: '0 2px 4px rgba(108, 43, 217, 0.2)', flexShrink: 0 }}
+            style={{ background: '#5D1CC9', border: 'none', color: 'white', cursor: 'pointer', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', boxShadow: '0 2px 4px rgba(93, 28, 201, 0.2)', flexShrink: 0 }}
           >
             <ArrowLeft size={18} />
           </button>
@@ -394,7 +394,7 @@ const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template'
             onChange={(e) => setTemplateName(e.target.value)}
             placeholder="Template name"
             style={{ fontSize: '20px', fontWeight: '700', color: '#111827', border: 'none', outline: 'none', borderBottom: '2px solid transparent', background: 'transparent', flex: 1, maxWidth: '420px' }}
-            onFocus={(e) => e.target.style.borderBottomColor = '#6C2BD9'}
+            onFocus={(e) => e.target.style.borderBottomColor = '#5D1CC9'}
             onBlur={(e) => e.target.style.borderBottomColor = 'transparent'}
           />
         </div>
@@ -402,7 +402,7 @@ const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template'
         <button
           onClick={handleSave}
           disabled={saving}
-          style={{ background: '#6C2BD9', border: 'none', color: 'white', padding: '10px 24px', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1, boxShadow: '0 4px 10px rgba(108, 43, 217, 0.2)', flexShrink: 0 }}
+          style={{ background: '#5D1CC9', border: 'none', color: 'white', padding: '10px 24px', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1, boxShadow: '0 4px 10px rgba(93, 28, 201, 0.2)', flexShrink: 0 }}
         >
           {saving ? 'Saving…' : 'Save Template'}
         </button>

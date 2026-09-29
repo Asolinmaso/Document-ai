@@ -115,7 +115,7 @@ const ExtractionView = ({ showToast }) => {
             onDrop={handleDrop}
             onClick={() => !file && fileInputRef.current?.click()}
             style={{
-              border: `2px dashed ${file ? '#6C2BD9' : '#D1D5DB'}`,
+              border: `2px dashed ${file ? '#5D1CC9' : '#D1D5DB'}`,
               borderRadius: '16px',
               padding: '32px 20px',
               textAlign: 'center',
@@ -134,7 +134,7 @@ const ExtractionView = ({ showToast }) => {
             ) : (
               <>
                 <div style={{ width: '56px', height: '56px', background: '#EDE9FE', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                  <FileImage size={28} color="#6C2BD9" />
+                  <FileImage size={28} color="#5D1CC9" />
                 </div>
                 <p style={{ fontWeight: '600', color: '#374151', marginBottom: '6px', fontSize: '14px' }}>
                   Drop your document here
@@ -142,7 +142,7 @@ const ExtractionView = ({ showToast }) => {
                 <p style={{ fontSize: '12px', color: '#9CA3AF', marginBottom: '16px' }}>
                   or click to browse — PNG, JPG (max {MAX_SIZE_MB} MB)
                 </p>
-                <span style={{ display: 'inline-block', padding: '9px 20px', backgroundColor: '#6C2BD9', color: 'white', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>
+                <span style={{ display: 'inline-block', padding: '9px 20px', backgroundColor: '#5D1CC9', color: 'white', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>
                   Select File
                 </span>
               </>
@@ -163,7 +163,7 @@ const ExtractionView = ({ showToast }) => {
             <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                style={{ flex: 1, padding: '9px', border: '1.5px solid #6C2BD9', background: 'white', color: '#6C2BD9', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                style={{ flex: 1, padding: '9px', border: '1.5px solid #5D1CC9', background: 'white', color: '#5D1CC9', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               >
                 <Upload size={14} /> Change File
               </button>
@@ -188,7 +188,7 @@ const ExtractionView = ({ showToast }) => {
             style={{
               width: '100%',
               padding: '13px',
-              backgroundColor: file && !loading ? '#6C2BD9' : '#E5E7EB',
+              backgroundColor: file && !loading ? '#5D1CC9' : '#E5E7EB',
               color: file && !loading ? 'white' : '#9CA3AF',
               borderRadius: '10px',
               fontWeight: '700',
@@ -232,7 +232,7 @@ const ExtractionView = ({ showToast }) => {
 
             {loading && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '300px', gap: '16px' }}>
-                <Loader size={36} color="#6C2BD9" style={{ animation: 'spin 0.8s linear infinite' }} />
+                <Loader size={36} color="#5D1CC9" style={{ animation: 'spin 0.8s linear infinite' }} />
                 <div style={{ textAlign: 'center' }}>
                   <p style={{ fontWeight: '600', color: '#374151', margin: '0 0 4px' }}>Analyzing your document…</p>
                   <p style={{ fontSize: '12px', color: '#9CA3AF', margin: 0 }}>This may take a few seconds</p>

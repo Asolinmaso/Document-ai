@@ -92,7 +92,7 @@ const DocumentView = ({ docs = [], searchQuery = '', onActionClick, onRowClick, 
                 <tr key={doc.id || i} style={{ borderBottom: i === docs.length - 1 ? 'none' : '1px solid #111827', cursor: 'pointer' }} onClick={() => onRowClick && onRowClick(doc)}>
                   <td style={{ padding: '20px 0' }}>
                     <div className="doc-info" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div className="doc-icon" style={{ background: '#6C2BD9', color: 'white', borderRadius: '4px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div className="doc-icon" style={{ background: '#5D1CC9', color: 'white', borderRadius: '4px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                          <FileText size={16} />
                       </div>
                       <span style={{ fontWeight: '500', color: '#111827', fontSize: '14px' }}>{doc.name}</span>

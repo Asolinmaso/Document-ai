@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import DocumentView from './DocumentView';
 import QuotationView from './QuotationView';
+import QuotationHistoryView from './QuotationHistoryView';
 import EditorView from './EditorView';
 import ProfileView from './ProfileView';
 import TrashView from './TrashView';
@@ -65,7 +66,7 @@ const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser }) => {
   ];
 
   return (
-    <div className="sidebar" style={{ background: '#6C2BD9', display: 'flex', flexDirection: 'column' }}>
+    <div className="sidebar" style={{ background: '#5D1CC9', display: 'flex', flexDirection: 'column' }}>
       <div style={{ color: 'white', fontSize: '22px', fontWeight: '700', padding: '10px 20px', marginBottom: '30px', letterSpacing: '-0.5px' }}>
         DocAI
       </div>
@@ -77,7 +78,7 @@ const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser }) => {
             className={`nav-item ${activeTab === item.name ? 'active' : ''}`}
             onClick={() => onTabClick(item.name)}
             style={activeTab === item.name
-              ? { background: 'white', color: '#6C2BD9', borderRadius: '10px', margin: '4px 10px', padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: '700', fontSize: '14px', transition: 'all 0.2s' }
+              ? { background: 'white', color: '#5D1CC9', borderRadius: '10px', margin: '4px 10px', padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: '700', fontSize: '14px', transition: 'all 0.2s' }
               : { color: 'rgba(255,255,255,0.8)', margin: '4px 10px', padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: '500', fontSize: '14px', borderRadius: '10px', transition: 'all 0.2s' }
             }
           >
@@ -144,7 +145,7 @@ const Topbar = ({ searchQuery, onSearchChange, title, profileData }) => (
 // ── Quick Actions ─────────────────────────────────────────────────────────────
 
 const QUICK_ACTIONS = [
-  { name: 'Create Quotation', color: '#6C2BD9' },
+  { name: 'Create Quotation', color: '#5D1CC9' },
   { name: 'Create Invoice', color: '#EF4444' },
   { name: 'Create MOU', color: '#22C55E' },
   { name: 'Create NDA', color: '#3B82F6' },
@@ -205,7 +206,7 @@ const RecentDocuments = ({ docs, onRowClick, onDeleteDoc, onEditDoc }) => (
           >
             <td style={{ padding: '14px 0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ background: '#EDE9FE', color: '#6C2BD9', borderRadius: '6px', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ background: '#EDE9FE', color: '#5D1CC9', borderRadius: '6px', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <FileText size={14} />
                 </div>
                 <span style={{ fontWeight: '500', color: '#111827', fontSize: '13px' }}>{doc.name}</span>
@@ -254,7 +255,7 @@ const RecentDocuments = ({ docs, onRowClick, onDeleteDoc, onEditDoc }) => (
 
 const ENTITIES = [
   { key: 'ddc', name: 'DDC', color: '#3B82F6', icon: <Building2 size={28} />, description: 'DDC workspace — set up coming soon.' },
-  { key: 'manvian', name: 'Manvian', color: '#6C2BD9', icon: <Globe size={28} />, description: 'Quick actions, templates and recent documents.' },
+  { key: 'manvian', name: 'Manvian', color: '#5D1CC9', icon: <Globe size={28} />, description: 'Quick actions, templates and recent documents.' },
 ];
 
 const DashboardEntitySelect = ({ onSelect }) => (
@@ -297,7 +298,7 @@ const DashboardEntitySelect = ({ onSelect }) => (
 const EntityBackLink = ({ label, onBack }) => (
   <div
     onClick={onBack}
-    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#6C2BD9', fontSize: '13px', fontWeight: '600', cursor: 'pointer', marginBottom: '20px' }}
+    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#5D1CC9', fontSize: '13px', fontWeight: '600', cursor: 'pointer', marginBottom: '20px' }}
   >
     <ChevronLeft size={16} /> {label}
   </div>
@@ -341,7 +342,7 @@ const LoadingSkeleton = () => (
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
-const Dashboard = ({ currentUser, onLogout, showToast }) => {
+const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeInitialDocId }) => {
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [currentSubView, setCurrentSubView] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
@@ -384,6 +385,20 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
     loadData();
     return () => { cancelled = true; };
   }, []);
+
+  // Opens the document a "Copy Link" URL pointed at, once the document list has loaded.
+  useEffect(() => {
+    if (!initialDocId || dataLoading || !allDocs.length) return;
+    const target = allDocs.find((d) => String(d.id) === String(initialDocId));
+    if (target) {
+      setSelectedDoc(target);
+      setCurrentSubView('editor');
+      setActiveTab('Document');
+    } else {
+      showToast?.('That shared document could not be found.', 'warning');
+    }
+    onConsumeInitialDocId?.();
+  }, [initialDocId, dataLoading, allDocs, onConsumeInitialDocId, showToast]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -448,6 +463,23 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
       showToast?.('Trash emptied successfully.', 'success');
     }
   }, [allDocs, showToast]);
+
+  // Persists quotation form data (company, positions, fees, status, filled PDF) against the
+  // document record, so Save-as-Draft and History work across reloads/devices, not just this browser.
+  const handleSaveQuotation = useCallback(async (id, data) => {
+    const docToUpdate = allDocs.find((d) => d.id === id);
+    if (!docToUpdate) throw new Error('Document not found.');
+    const updatedDoc = { ...docToUpdate, ...data };
+    setAllDocs((prev) => prev.map((d) => (d.id === id ? updatedDoc : d)));
+    try {
+      const saved = await updateDocument(id, data);
+      setAllDocs((prev) => prev.map((d) => (d.id === id ? saved : d)));
+      setSelectedDoc((cur) => (cur && cur.id === id ? saved : cur));
+    } catch (err) {
+      setAllDocs((prev) => prev.map((d) => (d.id === id ? docToUpdate : d)));
+      throw err;
+    }
+  }, [allDocs]);
 
   const handleUpdateDocStatus = useCallback(async (id, newStatus) => {
     const docToUpdate = allDocs.find((d) => d.id === id);
@@ -517,6 +549,8 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
     ? 'Template Editor'
     : currentSubView === 'quotation'
     ? 'Quotation'
+    : currentSubView === 'quotation_history'
+    ? 'Quotation History'
     : activeTab;
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -527,7 +561,7 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
       return (
         <div className="dashboard-content" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', gap: '16px' }}>
           <p style={{ color: '#EF4444', fontWeight: '500' }}>{dataError}</p>
-          <button onClick={() => window.location.reload()} style={{ padding: '10px 24px', background: '#6C2BD9', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}>
+          <button onClick={() => window.location.reload()} style={{ padding: '10px 24px', background: '#5D1CC9', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}>
             Refresh
           </button>
         </div>
@@ -535,7 +569,27 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
     }
 
     if (currentSubView === 'editor') {
-      return <EditorView doc={selectedDoc} onBack={() => setCurrentSubView(null)} logo={companyLogos[0]?.url} />;
+      return (
+        <EditorView
+          doc={selectedDoc}
+          onBack={() => setCurrentSubView(null)}
+          logo={companyLogos[0]?.url}
+          onSaveQuotation={handleSaveQuotation}
+          showToast={showToast}
+        />
+      );
+    }
+    if (currentSubView === 'quotation_history') {
+      return (
+        <QuotationHistoryView
+          docs={filteredQuotationDocs}
+          onBack={() => setCurrentSubView('quotation')}
+          onView={(d) => { setSelectedDoc(d); setCurrentSubView('editor'); }}
+          onEdit={(d) => { setSelectedDoc(d); setCurrentSubView('editor'); }}
+          onDelete={handleDeleteDocument}
+          showToast={showToast}
+        />
+      );
     }
     if (currentSubView === 'template_editor') {
       return (
@@ -553,6 +607,8 @@ const Dashboard = ({ currentUser, onLogout, showToast }) => {
           onBack={() => setCurrentSubView(null)}
           onSelectTemplate={(doc) => { setSelectedDoc(doc); setCurrentSubView('editor'); }}
           onCreateNewTemplate={() => setCurrentSubView('template_editor')}
+          onOpenHistory={() => setCurrentSubView('quotation_history')}
+          onDeleteDoc={handleDeleteDocument}
           searchQuery={searchQuery}
         />
       );

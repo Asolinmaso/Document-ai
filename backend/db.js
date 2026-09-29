@@ -271,6 +271,9 @@ export async function initSchema() {
     // Add extracted and extraction_id columns to existing documents table
     try { await client.query(`ALTER TABLE documents ADD COLUMN extracted BOOLEAN DEFAULT false`); } catch (e) {}
     try { await client.query(`ALTER TABLE documents ADD COLUMN extraction_id INTEGER REFERENCES extractions(id) ON DELETE SET NULL`); } catch (e) {}
+    // Quotation form fields (company name, positions, fees, etc.) so drafts/history survive reloads server-side.
+    // status also gains the 'draft' value alongside the existing 'active'/'trash'.
+    try { await client.query(`ALTER TABLE documents ADD COLUMN quotation_data JSONB DEFAULT '{}'::jsonb`); } catch (e) {}
 
 
     console.log('PostgreSQL schema structure verified.');

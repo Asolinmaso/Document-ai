@@ -27,6 +27,15 @@ function App() {
     }
   }, []);
 
+  // "Copy Link" on a quotation produces  <site>/?docId=...  – same one-shot read/clean pattern
+  // as reset_token above, so the shared link re-opens that exact document once logged in.
+  const [initialDocId, setInitialDocId] = useState(() => new URLSearchParams(window.location.search).get('docId'));
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('docId')) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
   // When auth state resolves, navigate accordingly (a reset link always wins)
   useEffect(() => {
     if (!loading) {
@@ -65,7 +74,7 @@ function App() {
           width: '40px',
           height: '40px',
           border: '3px solid rgba(255,255,255,0.15)',
-          borderTopColor: '#6C2BD9',
+          borderTopColor: '#5D1CC9',
           borderRadius: '50%',
           animation: 'spin 0.8s linear infinite',
         }} />
@@ -140,6 +149,8 @@ function App() {
             currentUser={user}
             onLogout={handleLogout}
             showToast={showToast}
+            initialDocId={initialDocId}
+            onConsumeInitialDocId={() => setInitialDocId(null)}
           />
         );
       default:

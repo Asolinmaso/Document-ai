@@ -92,7 +92,7 @@ const TrashView = ({ docs = [], onRestore, onDeletePermanently, onEmptyTrash, sh
           <button
             onClick={handleRestoreSelected}
             disabled={selectedDocs.length === 0}
-            style={{ background: 'white', border: '1.5px solid #6C2BD9', color: '#6C2BD9', padding: '9px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: selectedDocs.length === 0 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: selectedDocs.length === 0 ? 0.4 : 1, transition: 'all 0.2s' }}
+            style={{ background: 'white', border: '1.5px solid #5D1CC9', color: '#5D1CC9', padding: '9px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: selectedDocs.length === 0 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: selectedDocs.length === 0 ? 0.4 : 1, transition: 'all 0.2s' }}
           >
             <RotateCcw size={14} /> Restore Selected ({selectedDocs.length})
           </button>
@@ -120,7 +120,7 @@ const TrashView = ({ docs = [], onRestore, onDeletePermanently, onEmptyTrash, sh
               <th style={{ padding: '10px', width: '40px' }}>
                 <input
                   type="checkbox"
-                  style={{ cursor: 'pointer', accentColor: '#6C2BD9' }}
+                  style={{ cursor: 'pointer', accentColor: '#5D1CC9' }}
                   checked={selectedDocs.length === docs.length && docs.length > 0}
                   onChange={toggleSelectAll}
                 />
@@ -137,7 +137,7 @@ const TrashView = ({ docs = [], onRestore, onDeletePermanently, onEmptyTrash, sh
                 onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
               >
                 <td style={{ padding: '14px 10px' }}>
-                  <input type="checkbox" checked={selectedDocs.includes(doc.id)} onChange={() => toggleSelect(doc.id)} style={{ cursor: 'pointer', accentColor: '#6C2BD9' }} />
+                  <input type="checkbox" checked={selectedDocs.includes(doc.id)} onChange={() => toggleSelect(doc.id)} style={{ cursor: 'pointer', accentColor: '#5D1CC9' }} />
                 </td>
                 <td style={{ padding: '14px 0' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -154,7 +154,7 @@ const TrashView = ({ docs = [], onRestore, onDeletePermanently, onEmptyTrash, sh
                   <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button
                       onClick={() => handleRestore(doc.id, doc.name)}
-                      style={{ background: 'white', border: '1.5px solid #6C2BD9', color: '#6C2BD9', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
+                      style={{ background: 'white', border: '1.5px solid #5D1CC9', color: '#5D1CC9', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
                     >
                       <RotateCcw size={12} /> Restore
                     </button>
