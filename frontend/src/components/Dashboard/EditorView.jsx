@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import { analyzeTemplate, fillQuotation } from '../../utils/quotationEngine';
+import { downloadPdf, statusMeta } from '../../utils/docs';
+import { sendMail } from '../../services/dataService';
+import ConfirmDialog from '../ConfirmDialog';
+import QuotationSendModal from './QuotationSendModal';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 import {
   ArrowLeft,
@@ -19,7 +23,8 @@ import {
   Link,
   Type,
   Trash2,
-  Edit
+  Edit,
+  CheckCircle2
 } from 'lucide-react';
 
 const EMPTY_POSITION_FORM = { role: '', positions: '', qualifications: '', package: '' };
@@ -329,24 +334,29 @@ const PositionsList = memo(({ positions, editingId, onEdit, onDelete }) => {
   );
 });
 
-const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
+const escapeHtml = (text) => String(text).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onEditTemplate, onDeleteDoc, showToast, initialPreview = false }) => {
   const fileName = doc ? doc.name : "Recruitment Quotation";
   const docType = doc ? doc.type : "Quotation";
   const fileData = doc ? doc.file : null;
+  const isDraft = doc?.status === 'draft';
 
   // Saved per document, so one quotation's client / positions never leak into the next one
   const storageKey = `editorState:${doc?.id ?? 'default'}`;
 
-  const loadInitialState = (key, defaultVal) => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed[key] !== undefined) return parsed[key];
-      }
-    } catch (e) { }
-    return defaultVal;
-  };
+  // Two places hold the form's values: this browser's autosave (covers edits that were never saved) and the
+  // document record on the server (covers drafts opened from another browser/device). The newer one wins.
+  const [savedState] = useState(() => {
+    let local = null;
+    try { local = JSON.parse(localStorage.getItem(storageKey)); } catch { /* unreadable or blocked */ }
+    const server = doc?.quotationData && Object.keys(doc.quotationData).length ? doc.quotationData : null;
+    const serverTs = Date.parse(doc?.updatedAt) || 0;
+    if (local && (!server || (local._ts || 0) >= serverTs)) return local;
+    return server || local || {};
+  });
+
+  const loadInitialState = (key, defaultVal) => (savedState[key] !== undefined ? savedState[key] : defaultVal);
 
   // Returns today's date as "JUNE 19,2026" to match template header format
   const getTodayFormatted = () => {
@@ -387,6 +397,9 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
     const saved = loadInitialState('date', '');
     return saved ? parseFormattedDate(saved) : getTodayISO();
   });
+  // "To" (header recipient) and "Company Name" (every other company placeholder) are independent fields.
+  // Quotations saved before the split only have companyName, which then seeds both.
+  const [recipient, setRecipient] = useState(() => loadInitialState('recipient', loadInitialState('companyName', '')));
   const [companyName, setCompanyName] = useState(() => loadInitialState('companyName', ''));
   const [totalRequirements, setTotalRequirements] = useState(() => loadInitialState('totalRequirements', ''));
   const [replacementGuarantee, setReplacementGuarantee] = useState(() => loadInitialState('replacementGuarantee', ''));
@@ -395,6 +408,9 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
   // The document's own name — editable independently of the PDF fill pipeline below, so typing
   // here never waits on (or gets interrupted by) the debounced preview regeneration.
   const [docName, setDocName] = useState(() => loadInitialState('docName', fileName));
+  const [sendOpen, setSendOpen] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   const [positions, setPositions] = useState(() => loadInitialState('positions', []));
@@ -410,15 +426,24 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
   const [listType, setListType] = useState(() => loadInitialState('listType', 'none'));
   const [textColor, setTextColor] = useState(() => loadInitialState('textColor', '#111827'));
 
+  // The form fields are typed into freely; the document only changes when the user applies them (Update Data /
+  // Save / Finalize / Send). `applied` is the snapshot the preview and downloads are generated from.
+  const snapshot = () => ({ date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, isBold, isItalic, textColor });
+  const [applied, setApplied] = useState(snapshot);
+
   // Persisted to localStorage ~400ms after the user stops changing anything, instead of on
   // every keystroke — avoids a synchronous JSON.stringify + write on each character typed.
+  const autosaveBaseline = React.useRef(null); // initial values: untouched state must not be stamped "newer than the server"
   useEffect(() => {
-    const stateToSave = { date: date || undefined, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
+    const values = { date: date || undefined, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
+    const serialized = JSON.stringify(values);
+    if (autosaveBaseline.current === null) autosaveBaseline.current = serialized;
+    if (serialized === autosaveBaseline.current) return undefined;
     const timer = setTimeout(() => {
-      try { localStorage.setItem(storageKey, JSON.stringify(stateToSave)); } catch { /* storage full or blocked */ }
+      try { localStorage.setItem(storageKey, JSON.stringify({ ...values, _ts: Date.now() })); } catch { /* storage full or blocked */ }
     }, 400);
     return () => clearTimeout(timer);
-  }, [storageKey, date, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
+  }, [storageKey, date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
 
   // Template analysis: text lines, table grid and banner colour are measured once per uploaded PDF
   const [analysis, setAnalysis] = useState(null);
@@ -434,8 +459,16 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
         const result = await analyzeTemplate(pdfjsLib, pdfBytes);
         if (cancelled) return;
         setAnalysis(result);
-        if (result.extracted.date && !date) setDate(result.extracted.date);
-        if (result.extracted.company && !companyName) setCompanyName(result.extracted.company);
+        if (result.extracted.date && !date) {
+          setDate(result.extracted.date);
+          setApplied((a) => ({ ...a, date: result.extracted.date }));
+        }
+        // a fresh template with a client already in it seeds both fields once; after that they stay independent
+        if (result.extracted.company && !recipient && !companyName) {
+          setRecipient(result.extracted.company);
+          setCompanyName(result.extracted.company);
+          setApplied((a) => ({ ...a, recipient: result.extracted.company, companyName: result.extracted.company }));
+        }
       } catch (err) {
         console.error('Template analysis failed:', err);
       }
@@ -445,7 +478,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
 
   // Preview State
   const [previewPdfData, setPreviewPdfData] = useState(null);
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [isPreviewMode, setIsPreviewMode] = useState(initialPreview);
 
   const [pdfDoc, setPdfDoc] = useState(null);
   const [numPages, setNumPages] = useState(0);
@@ -491,7 +524,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
   // for a pause in typing.
   const runId = React.useRef(0);
 
-  const generatePreview = async (forDownload = false) => {
+  const generatePreview = async (forDownload = false, values = applied) => {
     if (!fileData || !analysis) return null;
     const myRun = ++runId.current;
 
@@ -502,8 +535,8 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
       const { bytes, warnings } = await fillQuotation(
         pdfBytes,
         analysis,
-        { date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions },
-        { fontFamily, isBold, isItalic, textColor }
+        values,
+        values
       );
       if (myRun !== runId.current && !forDownload) return null; // a newer edit superseded this run
 
@@ -531,21 +564,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
       const source = dataUrl || previewPdfData || fileData;
       if (!source) return;
 
-      const base64Data = source.split(',')[1] || source;
-      const binary = atob(base64Data);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-
-      const safeName = (fileName || 'quotation').trim().replace(/[^a-z0-9\-_ ]+/gi, '').replace(/\s+/g, '_') || 'quotation';
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${safeName}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      downloadPdf(source, docName || fileName);
     } catch (err) {
       console.error('Failed to download PDF:', err);
     } finally {
@@ -555,39 +574,91 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
 
   useEffect(() => {
     if (!fileData || !analysis) return;
-    const timer = setTimeout(() => { generatePreview(); }, 300);
+    const timer = setTimeout(() => { generatePreview(); }, 50);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysis, date, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, textColor, fontFamily, isBold, isItalic]);
+  }, [analysis, applied]);
 
   const [isSaving, setIsSaving] = useState(false);
 
-  // Persists the form's current values to the document record on the server (not just
-  // localStorage), so drafts/history survive across browsers and devices.
-  const handleSave = useCallback(async (status) => {
+  const buildQuotationData = () => ({ date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions, fontFamily, isBold, isItalic, textColor });
+
+  // Persists the form to the server (not just localStorage) so drafts/history survive across browsers and devices.
+  // Drafts and sent copies are their own records: saving one from a template/final document creates a new
+  // document and leaves the original untouched, instead of turning the template itself into a draft.
+  const persist = async (targetStatus, prebuiltFile = null) => {
+    const snap = snapshot();
+    setApplied(snap);
+    const dataUrl = prebuiltFile || (analysis ? await generatePreview(true, snap) : null);
+    let name = docName.trim() || fileName;
+    const payload = { status: targetStatus, quotationData: buildQuotationData(), ...(dataUrl ? { file: dataUrl } : {}) };
+    const createsNew = !isDraft && (targetStatus === 'draft' || targetStatus === 'sent');
+    if (createsNew) {
+      if (name === doc.name && companyName.trim()) name = `${name} - ${companyName.trim()}`;
+      const saved = await onCreateQuotation({
+        ...payload,
+        name,
+        type: doc.type || 'Quotation',
+        file: dataUrl || doc.file || '',
+        ...(doc.templateElements ? { templateElements: doc.templateElements } : {}),
+      });
+      try { localStorage.removeItem(storageKey); } catch { /* storage blocked */ }
+      return saved;
+    }
+    return onSaveQuotation(doc.id, { ...payload, name });
+  };
+
+  const runSave = async (targetStatus, successMessage) => {
     if (!doc || !onSaveQuotation) {
       showToast?.('Nothing to save yet — upload or open a document first.', 'warning');
       return;
     }
     setIsSaving(true);
     try {
-      const dataUrl = analysis ? await generatePreview(true) : null;
-      const quotationData = { date, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions, fontFamily, isBold, isItalic, textColor };
-      await onSaveQuotation(doc.id, {
-        name: docName,
-        status,
-        quotationData,
-        ...(dataUrl ? { file: dataUrl } : {}),
-      });
-      showToast?.(status === 'draft' ? 'Saved as draft.' : 'Quotation updated.', 'success');
+      await persist(targetStatus);
+      showToast?.(successMessage, 'success');
     } catch (err) {
       console.error('Failed to save quotation:', err);
       showToast?.('Failed to save. Please try again.', 'error');
     } finally {
       setIsSaving(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, onSaveQuotation, showToast, analysis, date, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions, fontFamily, isBold, isItalic, textColor, docName]);
+  };
+
+  const handleSaveDraft = () => runSave('draft', 'Saved as draft.');
+  const handleFinalize = () => runSave('active', 'Quotation finalized.');
+  // "Update Data" keeps whatever status the document already has
+  const handleUpdateData = () => runSave(doc?.status || 'active', isDraft ? 'Draft saved.' : 'Quotation updated.');
+
+  const handleSend = async ({ to, subject, message }) => {
+    setIsSending(true);
+    try {
+      const snap = snapshot();
+      setApplied(snap);
+      const dataUrl = analysis ? await generatePreview(true, snap) : fileData;
+      if (!dataUrl) throw new Error('There is no document to send.');
+      const result = await sendMail({
+        to,
+        subject,
+        body: escapeHtml(message).replace(/\n/g, '<br>'),
+        attachments: [{ name: `${(docName || fileName).trim() || 'quotation'}.pdf`, content: dataUrl }],
+      });
+      try { await persist('sent', dataUrl); } catch (err) { console.error('Sent, but could not update status:', err); }
+      setSendOpen(false);
+      showToast?.(result?.previewUrl ? `Sent to ${to} (test mailbox — no SMTP configured).` : `Quotation sent to ${to}.`, 'success');
+    } catch (err) {
+      showToast?.(err.message || 'Failed to send the quotation.', 'error');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  // Leaving for the template editor: store the current values first so they are still here on return.
+  const handleEditTemplate = async () => {
+    if (!doc || !onEditTemplate) return;
+    try { await onSaveQuotation?.(doc.id, { quotationData: buildQuotationData() }); } catch { /* local autosave still has them */ }
+    onEditTemplate(doc);
+  };
 
   // A shareable link re-opens this exact document (the app is a single-page state machine, so
   // the link carries the document id as a query param that App/Dashboard read on load).
@@ -672,8 +743,8 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
       </div>
 
       {/* Name and Actions Row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '14px', fontWeight: '700', color: '#111827', paddingBottom: '2px' }}>Name :</span>
           <input
             type="text"
@@ -692,8 +763,30 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
               background: 'transparent'
             }}
           />
+          {(isDraft || doc?.status === 'sent') && (
+            <span style={{ background: statusMeta(doc.status).bg, color: statusMeta(doc.status).color, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '700' }}>
+              {statusMeta(doc.status).label}
+            </span>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: '12px', position: 'relative' }}>
+        <div style={{ display: 'flex', gap: '12px', position: 'relative', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {onEditTemplate && (
+            <button onClick={handleEditTemplate} title="Open this template in the template editor" style={{
+              background: 'white',
+              border: '1.5px solid #E5E7EB',
+              color: '#5D1CC9',
+              padding: '8px 20px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              <Edit size={14} /> Edit
+            </button>
+          )}
           <button onClick={() => setIsPreviewMode(!isPreviewMode)} style={{
             background: isPreviewMode ? '#5D1CC9' : 'white',
             border: isPreviewMode ? '1.5px solid #5D1CC9' : '1.5px solid #E5E7EB',
@@ -706,6 +799,24 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
           }}>
             {isPreviewMode ? 'Edit Mode' : 'Preview'}
           </button>
+          {isDraft && (
+            <button onClick={handleFinalize} disabled={isSaving} style={{
+              background: '#16A34A',
+              border: '1.5px solid #16A34A',
+              color: 'white',
+              padding: '8px 18px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: '600',
+              cursor: isSaving ? 'default' : 'pointer',
+              opacity: isSaving ? 0.7 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              <CheckCircle2 size={14} /> Finalize
+            </button>
+          )}
           <button onClick={() => setShowMoreMenu(!showMoreMenu)} style={{
             background: 'white',
             border: '1.5px solid #E5E7EB',
@@ -742,9 +853,17 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
               <div onClick={() => { setShowMoreMenu(false); handleCopyLink(); }} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', color: '#5D1CC9', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
                 Copy Link
               </div>
-              <div onClick={() => { setShowMoreMenu(false); handleSave('draft'); }} style={{ padding: '12px 16px', color: isSaving ? '#9CA3AF' : '#5D1CC9', fontWeight: '600', fontSize: '13px', cursor: isSaving ? 'default' : 'pointer' }}>
-                {isSaving ? 'Saving…' : 'Save As Draft'}
+              <div onClick={() => { setShowMoreMenu(false); handleSaveDraft(); }} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', color: isSaving ? '#9CA3AF' : '#5D1CC9', fontWeight: '600', fontSize: '13px', cursor: isSaving ? 'default' : 'pointer' }}>
+                {isSaving ? 'Saving…' : isDraft ? 'Save Draft' : 'Save As Draft'}
               </div>
+              <div onClick={() => { setShowMoreMenu(false); setSendOpen(true); }} style={{ padding: '12px 16px', borderBottom: isDraft ? '1px solid #E5E7EB' : 'none', color: '#5D1CC9', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
+                Send by Email
+              </div>
+              {isDraft && onDeleteDoc && (
+                <div onClick={() => { setShowMoreMenu(false); setConfirmDelete(true); }} style={{ padding: '12px 16px', color: '#DC2626', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
+                  Delete Draft
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -810,12 +929,24 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
                   />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>To :</label>
+                  <label htmlFor="quotation-to" style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>To :</label>
                   <input
+                    id="quotation-to"
+                    type="text"
+                    value={recipient}
+                    onChange={e => setRecipient(e.target.value)}
+                    placeholder="Shown after “To :” in the header"
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label htmlFor="quotation-company" style={{ fontSize: '12px', fontWeight: '600', color: '#6B7280' }}>Company Name :</label>
+                  <input
+                    id="quotation-company"
                     type="text"
                     value={companyName}
                     onChange={e => setCompanyName(e.target.value)}
-                    placeholder="e.g. Art Mount"
+                    placeholder="Used for the company name in the quotation text"
                     style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #D1D5DB', outline: 'none', fontSize: '13px' }}
                   />
                 </div>
@@ -871,7 +1002,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
                 </div>
 
                 <button
-                  onClick={() => handleSave(doc?.status === 'draft' ? 'draft' : 'active')}
+                  onClick={handleUpdateData}
                   disabled={isSaving}
                   style={{
                     alignSelf: 'flex-end',
@@ -887,7 +1018,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
                     marginTop: '4px'
                   }}
                 >
-                  {isSaving ? 'Updating…' : 'Update Data'}
+                  {isSaving ? 'Saving…' : isDraft ? 'Save Draft' : 'Update Data'}
                 </button>
               </div>
             </div>
@@ -903,6 +1034,23 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, showToast }) => {
         />
 
       </div>
+
+      {sendOpen && (
+        <QuotationSendModal
+          open
+          defaultSubject={`Quotation${(companyName || recipient).trim() ? ` for ${(companyName || recipient).trim()}` : ''}`}
+          sending={isSending}
+          onSend={handleSend}
+          onClose={() => setSendOpen(false)}
+        />
+      )}
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete this draft?"
+        message={`"${docName || fileName}" will be permanently deleted. This can't be undone.`}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => { setConfirmDelete(false); onDeleteDoc(doc); }}
+      />
     </div>
   );
 };

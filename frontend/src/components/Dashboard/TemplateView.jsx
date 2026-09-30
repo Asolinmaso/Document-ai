@@ -64,7 +64,6 @@ const TemplateView = ({ templates, onAddTemplate, onDeleteTemplate, onEditTempla
     const newTemplate = { 
       name: templateName,
       type: docType,
-      edited: 'Just Now',
       file: fileData,
       fileName: fileName
     };

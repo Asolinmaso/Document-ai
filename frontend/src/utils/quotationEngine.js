@@ -52,7 +52,7 @@ const defaultRasterize = async (page, scale) => {
   return ctx.getImageData(0, 0, canvas.width, canvas.height);
 };
 
-const groupIntoLines = (items, pageNum) => {
+export const groupIntoLines = (items, pageNum) => {
   const lines = [];
   items.forEach((item) => {
     const y = Math.round(item.transform[5]);
@@ -265,10 +265,21 @@ const wrapText = (text, font, size, maxW) => {
   return lines.length ? lines : [''];
 };
 
+/** Cuts `text` with "..." so it fits `maxW` at the given size. Used instead of shrinking the font. */
+const ellipsize = (text, font, size, maxW) => {
+  const t = String(text ?? '');
+  if (font.widthOfTextAtSize(t, size) <= maxW) return t;
+  const dots = '...';
+  let n = t.length;
+  while (n > 1 && font.widthOfTextAtSize(t.slice(0, n).trimEnd() + dots, size) > maxW) n--;
+  return t.slice(0, n).trimEnd() + dots;
+};
+
 /**
  * Re-typesets the paragraph that contains a replaced span. Used when a long value cannot be patched in place
  * without running into the text that follows it. Bold runs are kept, lines are wrapped and justified to the
- * paragraph's own margins, and the line count is capped so it never runs into the next block.
+ * paragraph's own margins, and the line count is capped so it never runs into the next block. The font size is
+ * never reduced: a value that would need more lines than the paragraph can spare is cut with "..." instead.
  */
 const planReflow = ({ lines, chars, spanItem, s, e, newText, fonts, textRgb }) => {
   const idx = lines.findIndex((l) => l.items.includes(spanItem));
@@ -338,11 +349,21 @@ const planReflow = ({ lines, chars, spanItem, s, e, newText, fonts, textRgb }) =
     if (row.length) rows.push(row);
     return rows;
   };
-  let size = size0;
+  const size = size0;
   let rows = layout(size);
-  for (const sc of [0.95, 0.9, 0.85, 0.8, 0.75]) {
-    if (rows.length <= maxLines) break;
-    size = size0 * sc;
+  // too long for the room available: trim the inserted value (last word first) instead of shrinking the text
+  while (rows.length > maxLines) {
+    const customAt = words.reduce((acc, w, i) => (w.custom ? [...acc, i] : acc), []);
+    if (!customAt.length) break;
+    const last = customAt[customAt.length - 1];
+    const bare = words[last].text.replace(/\.{3}$/, '');
+    if (customAt.length > 1) {
+      words.splice(last, 1);
+      const prev = customAt[customAt.length - 2];
+      words[prev] = { ...words[prev], text: `${words[prev].text.replace(/\.{3}$/, '')}...` };
+    } else if (bare.length > 4) {
+      words[last] = { ...words[last], text: `${bare.slice(0, Math.max(3, bare.length - 3))}...` };
+    } else break;
     rows = layout(size);
   }
 
@@ -396,6 +417,9 @@ const buildReplacements = ({ date, companyName, replacementGuarantee, serviceFee
     if (/^\d+(\.\d+)?$/.test(f)) f += '%';
     list.push({ re: /standard\s+service\s+fee\s+for\s+recruitment\s+is\s+([\s\S]+?)\s+of\s+the/gi, group: 1, text: f });
     list.push({ re: new RegExp(escapeRe('Rs . XX %'), 'gi'), group: 0, text: `Rs . ${f}` });
+    // Fee Structure lines that restate the service fee percentage
+    list.push({ re: /(\d+(?:\.\d+)?\s*%)\s+of\s+candidate['’]s\s+annual\s+CTC/gi, group: 1, text: f });
+    list.push({ re: /within\s+the\s+(\d+(?:\.\d+)?\s*%)\s+service\s+fee/gi, group: 1, text: f });
     token(['xxx_%', 'xxx%', 'xx %', 'xx%', '[fee]'], f);
   }
   return list;
@@ -502,8 +526,8 @@ const applyReplacements = (page, pageLines, replacements, ctx) => {
         return false;
       };
 
-      // 1) fits as is (or after a slight shrink)
-      let fitted = tryScales(reflow ? [1, 0.92, 0.85, 0.78, 0.7] : [1, 0.92]);
+      // 1) fits as is. The font size is never reduced, so every value keeps the template's own size.
+      let fitted = tryScales([1]);
       // 2) too long for its slot: let the words that follow on the same line move along instead of shrinking the value
       if (!fitted && !reflow) {
         const tail = slots[slots.length - 1];
@@ -516,12 +540,12 @@ const applyReplacements = (page, pageLines, replacements, ctx) => {
           const original = tail.cap;
           // the line keeps its original right edge; the moved words are set in the (narrower) regular font
           tail.cap = Math.max(original, line.maxX - sufW - tail.item.transform[4] - tail.keptW - space);
-          if (tryScales([1, 0.92, 0.85])) { fitted = true; suffix.forEach((i) => moved.add(i)); shifts.push({ item: tail.item, suffix }); }
+          if (tryScales([1])) { fitted = true; suffix.forEach((i) => moved.add(i)); shifts.push({ item: tail.item, suffix }); }
           else tail.cap = original;
         }
       }
-      // 3) last resort: shrink harder
-      if (!fitted) { fitted = tryScales([0.85, 0.78, 0.7]); if (!fitted) { scale = 0.7; chosen = alloc(0.7); } }
+      // 3) last resort: keep the size, the value is cut with "..." below (unless the paragraph is re-typeset)
+      if (!fitted) { scale = 1; chosen = alloc(1); }
 
       const lastUsed = chosen.buckets.reduce((acc, b, i) => (b.length ? i : acc), -1);
       const holeAfter = lastUsed >= 0 && lastUsed < slots.length - 1;
@@ -533,6 +557,12 @@ const applyReplacements = (page, pageLines, replacements, ctx) => {
         chars.forEach((c) => { if (c.item && plan.items.has(c.item)) c.gone = true; });
         late.push(plan.draw);
         continue;
+      }
+      if (!chosen.ok) {
+        chosen = {
+          ...chosen,
+          buckets: chosen.buckets.map((b, i) => (b.length ? [ellipsize(b.join(' '), fonts.main, slots[i].size, slots[i].cap)] : b)),
+        };
       }
       slots.forEach((slot, i) => {
         slot.items.forEach((item, j) => {
@@ -588,14 +618,9 @@ const applyReplacements = (page, pageLines, replacements, ctx) => {
   late.forEach((draw) => draw(page));
 };
 
-// Company name shown after "To :" is capped so it always reads on one line at full size,
-// regardless of how long the real name is.
-const TO_FIELD_MAX_CHARS = 8;
-const truncateCompanyForToField = (name) => {
-  if (!name) return name;
-  const trimmed = name.trim();
-  return trimmed.length > TO_FIELD_MAX_CHARS ? `${trimmed.slice(0, TO_FIELD_MAX_CHARS)}...` : trimmed;
-};
+// Header values ("Date :" / "To :") stay on one line at the template's own size. They may use at most
+// this share of the page width; anything longer is cut with "..." rather than shrunk or wrapped.
+const HEADER_VALUE_MAX_WIDTH_RATIO = 0.4;
 
 /** Date : / To : header lines – filled by label, so blank, placeholder and old values are all handled. */
 const fillHeaderFields = (page, pageLines, values, ctx) => {
@@ -603,14 +628,13 @@ const fillHeaderFields = (page, pageLines, values, ctx) => {
   const fields = [
     // The date sits directly above "To :" in most banners, so it must stay on one line –
     // wrapping would push its second line down into (and get erased by) the field below it.
-    // A short, bounded shrink keeps it on one line without touching the configured value font.
-    { re: /^\s*date\s*:/i, label: 'Date :', value: values.date, allowShrink: true },
-    // The company name is truncated to a fixed character count so it always stays on one
-    // line at full size — it never shrinks or wraps onto extra lines.
-    { re: /^\s*to\s*:/i, label: 'To :', value: truncateCompanyForToField(values.companyName), allowShrink: false, noWrap: true },
+    { re: /^\s*date\s*:/i, label: 'Date :', value: values.date },
+    // The recipient (the form's "To" field) only ever fills this header line; the form's separate
+    // "Company Name" drives the placeholders in the body text.
+    { re: /^\s*to\s*:/i, label: 'To :', value: values.recipient },
   ];
   pageLines.filter((l) => l.y > bannerY).forEach((line) => {
-    fields.forEach(({ re, label, value, allowShrink, noWrap }) => {
+    fields.forEach(({ re, label, value }) => {
       if (!value) return;
       const idx = line.items.findIndex((i) => re.test(i.str));
       if (idx < 0) return;
@@ -619,23 +643,10 @@ const fillHeaderFields = (page, pageLines, values, ctx) => {
       const size = fontSizeOf(labelItem);
 
       const x = labelOnly ? labelItem.transform[4] + labelItem.width + fonts.main.widthOfTextAtSize(' ', size) : labelItem.transform[4];
-      const txt = safe(labelOnly ? value : `${label} ${value}`);
-      const maxW = pageW - RIGHT_MARGIN - x;
+      const maxW = Math.min(pageW - RIGHT_MARGIN - x, pageW * HEADER_VALUE_MAX_WIDTH_RATIO);
 
-      let fs = size;
-      let wrapped;
-      if (noWrap) {
-        // Already capped to a fixed character count: stays on one line at the template's own
-        // size, no shrinking, no wrapping.
-        wrapped = [txt];
-      } else if (allowShrink) {
-        while (fonts.main.widthOfTextAtSize(txt, fs) > maxW && fs > size * 0.7) fs -= 0.25;
-        wrapped = fonts.main.widthOfTextAtSize(txt, fs) <= maxW ? [txt] : wrapText(txt, fonts.main, fs, maxW);
-      } else {
-        // Long values wrap onto extra lines beneath the field at the template's own font size,
-        // instead of shrinking the font or truncating the text with "...".
-        wrapped = wrapText(txt, fonts.main, fs, maxW);
-      }
+      const fs = size;
+      const wrapped = [ellipsize(safe(labelOnly ? value : `${label} ${value}`), fonts.main, fs, maxW)];
       const lineH = fs * 1.3;
       const bandTop = labelItem.transform[5] + fs * 1.15;
       const bandBottom = labelItem.transform[5] - fs * 0.4 - lineH * (wrapped.length - 1);
@@ -650,10 +661,10 @@ const fillHeaderFields = (page, pageLines, values, ctx) => {
 
 /* ── table ─────────────────────────────────────────────────────────────── */
 
+// One text size for every cell of every row: long content wraps and the rows grow (spilling onto
+// continuation pages when needed) instead of the font shrinking.
 const LEVELS = [
   { fs: 10, padX: 5, padY: 8, minH: 30 },
-  { fs: 9, padX: 4, padY: 6, minH: 24 },
-  { fs: 8, padX: 4, padY: 4, minH: 19 },
 ];
 
 const rowCells = (row, index) => [String(index + 1), row?.role ?? '', String(row?.positions ?? ''), row?.qualifications ?? '', row?.package ?? ''];
@@ -664,10 +675,7 @@ const layoutRow = (cells, cols, lvl, fonts, safe) => {
     const font = c === 1 ? fonts.bold : fonts.regular;
     const txt = safe(raw);
     const maxW = cols[c + 1] - cols[c] - lvl.padX * 2;
-    // a cell that would only just wrap is shrunk (by up to 2pt) so it stays on one line
-    let fs = lvl.fs;
-    while (fs > Math.max(7, lvl.fs - 2) && font.widthOfTextAtSize(txt, fs) > maxW) fs -= 0.5;
-    if (font.widthOfTextAtSize(txt, fs) > maxW) fs = lvl.fs;
+    const fs = lvl.fs;
     sizes.push(fs);
     return wrapText(txt, font, fs, maxW);
   });
@@ -840,6 +848,7 @@ export async function fillQuotation(pdfBytes, analysis, values, style = {}) {
   const clean = {
     date: values.date?.trim(),
     companyName: values.companyName?.trim(),
+    recipient: values.recipient?.trim(),
     replacementGuarantee: values.replacementGuarantee?.trim(),
     serviceFee: values.serviceFee?.trim(),
   };
@@ -859,7 +868,7 @@ export async function fillQuotation(pdfBytes, analysis, values, style = {}) {
     const ctx = { fonts, safe, pageW, pageH, pageY0, bannerY: pageY0 + pageH * BANNER_RATIO, textRgb, banner: analysis.bannerRgb || BANNER_RGB };
     const pageLines = analysis.pdfLines.filter((l) => l.page === p + 1);
 
-    try { fillHeaderFields(page, pageLines, { date: clean.date, companyName: clean.companyName }, ctx); } catch (e) { console.error('Header fill failed:', e); }
+    try { fillHeaderFields(page, pageLines, { date: clean.date, recipient: clean.recipient }, ctx); } catch (e) { console.error('Header fill failed:', e); }
     try { applyReplacements(page, pageLines, replacements, ctx); } catch (e) { console.error('Text replacement failed:', e); }
 
     if (rowCount > 0) {

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import DocumentView from './DocumentView';
 import QuotationView from './QuotationView';
 import QuotationHistoryView from './QuotationHistoryView';
+import DraftsView from './DraftsView';
+import ConfirmDialog from '../ConfirmDialog';
 import EditorView from './EditorView';
 import ProfileView from './ProfileView';
 import TrashView from './TrashView';
@@ -25,7 +27,11 @@ import {
   Building2,
   Globe,
   Clock,
+  FilePen,
+  History,
 } from 'lucide-react';
+import { useNow } from '../../hooks/useNow';
+import { isLiveDoc, isQuotationDoc, lastUpdatedLabel } from '../../utils/docs';
 import {
   fetchProfile,
   updateProfile,
@@ -54,12 +60,14 @@ const SolidDocIcon = ({ color, size = 'md' }) => {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
-const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser }) => {
+const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser, draftCount }) => {
   const menuItems = [
     { name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { name: 'Document', icon: <FileText size={18} /> },
     { name: 'AI Extract', icon: <Sparkles size={18} /> },
     { name: 'Template', icon: <Layers size={18} /> },
+    { name: 'Drafts', icon: <FilePen size={18} />, badge: draftCount },
+    { name: 'History', icon: <History size={18} /> },
     { name: 'Mail Center', icon: <Mail size={18} /> },
     { name: 'My Profile', icon: <User size={18} /> },
     { name: 'Trash', icon: <Trash2 size={18} /> },
@@ -83,7 +91,10 @@ const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser }) => {
             }
           >
             {item.icon}
-            <span>{item.name}</span>
+            <span style={{ flex: 1 }}>{item.name}</span>
+            {item.badge > 0 && (
+              <span style={{ background: activeTab === item.name ? '#5D1CC9' : 'rgba(255,255,255,0.22)', color: 'white', borderRadius: '10px', padding: '1px 8px', fontSize: '11px', fontWeight: '700' }}>{item.badge}</span>
+            )}
           </li>
         ))}
       </ul>
@@ -181,7 +192,7 @@ const QuickActions = ({ onActionClick }) => (
 
 // ── Recent Documents Table ────────────────────────────────────────────────────
 
-const RecentDocuments = ({ docs, onRowClick, onDeleteDoc, onEditDoc }) => (
+const RecentDocuments = ({ docs, now, onRowClick, onDeleteDoc, onEditDoc }) => (
   <div>
     <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '16px', color: '#111827' }}>
       Recent Documents <span style={{ color: '#9CA3AF', fontWeight: '500' }}>({docs.length})</span>
@@ -215,7 +226,7 @@ const RecentDocuments = ({ docs, onRowClick, onDeleteDoc, onEditDoc }) => (
             <td style={{ padding: '14px 0', color: '#6B7280', fontSize: '13px' }}>
               <span style={{ background: '#F3F4F6', padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '500' }}>{doc.type || '—'}</span>
             </td>
-            <td style={{ padding: '14px 0', color: '#9CA3AF', fontSize: '12px' }}>{doc.edited || '—'}</td>
+            <td style={{ padding: '14px 0', color: '#9CA3AF', fontSize: '12px' }}>{lastUpdatedLabel(doc, now)}</td>
             <td style={{ padding: '14px 0', textAlign: 'right' }}>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
                 <button
@@ -321,11 +332,11 @@ const DdcPlaceholder = ({ onBack }) => (
 
 // ── Dashboard Content (home page) ─────────────────────────────────────────────
 
-const DashboardHome = ({ docs, onActionClick, onRowClick, onDeleteDoc, onEditDoc, onBack }) => (
+const DashboardHome = ({ docs, now, onActionClick, onRowClick, onDeleteDoc, onEditDoc, onBack }) => (
   <div className="dashboard-content">
     <EntityBackLink label="Switch workspace" onBack={onBack} />
     <QuickActions onActionClick={onActionClick} />
-    <RecentDocuments docs={docs} onRowClick={onRowClick} onDeleteDoc={onDeleteDoc} onEditDoc={onEditDoc} />
+    <RecentDocuments docs={docs} now={now} onRowClick={onRowClick} onDeleteDoc={onDeleteDoc} onEditDoc={onEditDoc} />
   </div>
 );
 
@@ -348,6 +359,10 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [dashboardMode, setDashboardMode] = useState(null); // null = show DDC/Manvian selector, 'ddc' | 'manvian' = chosen workspace
+  const [editorPreview, setEditorPreview] = useState(false); // open the editor straight in preview mode
+  const [draftToDelete, setDraftToDelete] = useState(null);
+  const [deletingDraft, setDeletingDraft] = useState(false);
+  const now = useNow();
 
   const [profileData, setProfileData] = useState(null);
   const [companyLogos, setCompanyLogos] = useState([]);
@@ -424,7 +439,8 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
   }, [showToast]);
 
   const handleAddDocument = useCallback(async (newDoc) => {
-    const optimisticDoc = { ...newDoc, id: Date.now(), status: 'active' };
+    const stamp = new Date().toISOString();
+    const optimisticDoc = { ...newDoc, id: Date.now(), status: 'active', createdAt: stamp, updatedAt: stamp };
     setAllDocs((prev) => [optimisticDoc, ...prev]);
     try {
       const saved = await createDocument(newDoc);
@@ -440,6 +456,7 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
   const handleDeleteDocument = useCallback((id) => {
     handleUpdateDocStatus(id, 'trash');
     showToast?.('Document moved to trash.', 'info');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showToast]);
 
   const handleDeletePermanently = useCallback(async (id) => {
@@ -469,22 +486,60 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
   const handleSaveQuotation = useCallback(async (id, data) => {
     const docToUpdate = allDocs.find((d) => d.id === id);
     if (!docToUpdate) throw new Error('Document not found.');
-    const updatedDoc = { ...docToUpdate, ...data };
+    const updatedDoc = { ...docToUpdate, ...data, updatedAt: new Date().toISOString() };
     setAllDocs((prev) => prev.map((d) => (d.id === id ? updatedDoc : d)));
     try {
       const saved = await updateDocument(id, data);
       setAllDocs((prev) => prev.map((d) => (d.id === id ? saved : d)));
       setSelectedDoc((cur) => (cur && cur.id === id ? saved : cur));
+      return saved;
     } catch (err) {
       setAllDocs((prev) => prev.map((d) => (d.id === id ? docToUpdate : d)));
       throw err;
     }
   }, [allDocs]);
 
+  // A draft / sent quotation made from a template is its own record, so the template itself stays untouched.
+  // The editor switches to the new record (it is re-mounted because it is keyed by document id).
+  const handleCreateQuotation = useCallback(async (data) => {
+    const saved = await createDocument(data);
+    setAllDocs((prev) => [saved, ...prev]);
+    setSelectedDoc(saved);
+    return saved;
+  }, []);
+
+  // Template Editor "Save Changes": update the template file + its widgets, then return to the quotation.
+  const handleSaveTemplateEdit = useCallback(async (id, data) => {
+    await handleSaveQuotation(id, data);
+    showToast?.('Template updated. Preview to see your changes.', 'success');
+    setCurrentSubView('editor');
+  }, [handleSaveQuotation, showToast]);
+
+  const openEditor = (doc, { preview = false } = {}) => {
+    setSelectedDoc(doc);
+    setEditorPreview(preview);
+    setCurrentSubView('editor');
+  };
+
+  // Drafts are throw-away work, so deleting one is permanent (after a confirmation); anything else goes to Trash.
+  const requestDelete = (doc) => {
+    if (doc.status === 'draft') setDraftToDelete(doc);
+    else handleDeleteDocument(doc.id);
+  };
+
+  const confirmDraftDelete = async (doc = draftToDelete) => {
+    if (!doc) return;
+    setDeletingDraft(true);
+    await handleDeletePermanently(doc.id);
+    setDeletingDraft(false);
+    setDraftToDelete(null);
+    if (currentSubView === 'editor') { setCurrentSubView(null); setSelectedDoc(null); }
+  };
+
   const handleUpdateDocStatus = useCallback(async (id, newStatus) => {
     const docToUpdate = allDocs.find((d) => d.id === id);
     if (!docToUpdate) return;
-    const updatedDoc = { ...docToUpdate, status: newStatus };
+    const updatedDoc = { ...docToUpdate, status: newStatus, updatedAt: new Date().toISOString() };
     setAllDocs((prev) => prev.map((d) => (d.id === id ? updatedDoc : d)));
     try {
       await updateDocument(id, { status: newStatus });
@@ -495,15 +550,9 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
     }
   }, [allDocs, showToast]);
 
-  const handleRowClick = (doc) => {
-    setSelectedDoc(doc);
-    setCurrentSubView('editor');
-  };
+  const handleRowClick = (doc) => openEditor(doc);
 
-  const handleEditDocument = (doc) => {
-    setSelectedDoc(doc);
-    setCurrentSubView('editor');
-  };
+  const handleEditDocument = (doc) => openEditor(doc);
 
   const handleActionClick = (actionName) => {
     if (actionName === 'Create Quotation') {
@@ -522,11 +571,13 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
     setSearchQuery('');
     setSelectedDoc(null);
     setDashboardMode(null);
+    setEditorPreview(false);
   };
 
   // ── Derived Data ──────────────────────────────────────────────────────────
 
-  const activeDocs = allDocs.filter((d) => d.status === 'active');
+  const activeDocs = allDocs.filter(isLiveDoc);
+  const draftDocs = allDocs.filter((d) => d.status === 'draft');
   const trashDocs = allDocs.filter((d) => d.status === 'trash');
 
   const filterDocs = (docs) => docs.filter(
@@ -537,9 +588,11 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
 
   const filteredDocs = filterDocs(activeDocs);
   const filteredTrash = filterDocs(trashDocs);
-  const filteredQuotationDocs = filteredDocs.filter(
-    (d) => d.type === 'Quotation' || d.name?.toLowerCase().includes('quotation')
-  );
+  const filteredQuotationDocs = filteredDocs.filter(isQuotationDoc);
+  const filteredDrafts = filterDocs(draftDocs);
+  // History covers every quotation that still exists: drafts, finalized and sent (trashed ones live in Trash)
+  const historyDocs = filterDocs(allDocs.filter((d) => d.status !== 'trash')).filter(isQuotationDoc)
+    .sort((a, b) => (Date.parse(b.updatedAt) || Number(b.id) || 0) - (Date.parse(a.updatedAt) || Number(a.id) || 0));
 
   // ── Topbar title ──────────────────────────────────────────────────────────
 
@@ -547,6 +600,8 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
     ? selectedDoc?.name || 'Document Editor'
     : currentSubView === 'template_editor'
     ? 'Template Editor'
+    : currentSubView === 'template_edit'
+    ? 'Edit Template'
     : currentSubView === 'quotation'
     ? 'Quotation'
     : currentSubView === 'quotation_history'
@@ -571,22 +626,41 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
     if (currentSubView === 'editor') {
       return (
         <EditorView
+          key={selectedDoc?.id}
           doc={selectedDoc}
           onBack={() => setCurrentSubView(null)}
           logo={companyLogos[0]?.url}
           onSaveQuotation={handleSaveQuotation}
+          onCreateQuotation={handleCreateQuotation}
+          onEditTemplate={() => setCurrentSubView('template_edit')}
+          onDeleteDoc={confirmDraftDelete}
+          initialPreview={editorPreview}
           showToast={showToast}
+        />
+      );
+    }
+    if (currentSubView === 'template_edit' && selectedDoc) {
+      return (
+        <TemplateEditorView
+          key={selectedDoc.id}
+          isEdit
+          docName={selectedDoc.name}
+          initialElements={selectedDoc.templateElements || null}
+          sourceFile={selectedDoc.file}
+          onBack={() => setCurrentSubView('editor')}
+          onSave={(data) => handleSaveTemplateEdit(selectedDoc.id, { name: data.name, file: data.file, templateElements: data.templateElements })}
         />
       );
     }
     if (currentSubView === 'quotation_history') {
       return (
         <QuotationHistoryView
-          docs={filteredQuotationDocs}
+          docs={historyDocs}
+          now={now}
           onBack={() => setCurrentSubView('quotation')}
-          onView={(d) => { setSelectedDoc(d); setCurrentSubView('editor'); }}
-          onEdit={(d) => { setSelectedDoc(d); setCurrentSubView('editor'); }}
-          onDelete={handleDeleteDocument}
+          onView={(d) => openEditor(d, { preview: true })}
+          onEdit={(d) => openEditor(d)}
+          onDelete={requestDelete}
           showToast={showToast}
         />
       );
@@ -604,8 +678,9 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
       return (
         <QuotationView
           docs={filteredQuotationDocs}
+          now={now}
           onBack={() => setCurrentSubView(null)}
-          onSelectTemplate={(doc) => { setSelectedDoc(doc); setCurrentSubView('editor'); }}
+          onSelectTemplate={(doc) => openEditor(doc)}
           onCreateNewTemplate={() => setCurrentSubView('template_editor')}
           onOpenHistory={() => setCurrentSubView('quotation_history')}
           onDeleteDoc={handleDeleteDocument}
@@ -625,6 +700,7 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
         return (
           <DashboardHome
             docs={filteredDocs.slice(0, 10)}
+            now={now}
             onActionClick={handleActionClick}
             onRowClick={handleRowClick}
             onDeleteDoc={handleDeleteDocument}
@@ -636,11 +712,33 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
         return (
           <DocumentView
             docs={filteredDocs}
+            now={now}
             searchQuery={searchQuery}
             onActionClick={handleActionClick}
             onRowClick={handleRowClick}
             onDeleteDocument={handleDeleteDocument}
             onEditDocument={handleEditDocument}
+          />
+        );
+      case 'Drafts':
+        return (
+          <DraftsView
+            docs={filteredDrafts}
+            now={now}
+            onContinue={(d) => openEditor(d)}
+            onPreview={(d) => openEditor(d, { preview: true })}
+            onDelete={requestDelete}
+          />
+        );
+      case 'History':
+        return (
+          <QuotationHistoryView
+            docs={historyDocs}
+            now={now}
+            onView={(d) => openEditor(d, { preview: true })}
+            onEdit={(d) => openEditor(d)}
+            onDelete={requestDelete}
+            showToast={showToast}
           />
         );
       case 'AI Extract':
@@ -692,6 +790,7 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
         onTabClick={handleTabClick}
         onLogout={onLogout}
         currentUser={currentUser}
+        draftCount={draftDocs.length}
       />
       <div className="main-content">
         <Topbar
@@ -704,6 +803,14 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
           {renderContent()}
         </div>
       </div>
+      <ConfirmDialog
+        open={Boolean(draftToDelete)}
+        title="Delete this draft?"
+        message={`"${draftToDelete?.name || ''}" will be permanently deleted. This can't be undone.`}
+        busy={deletingDraft}
+        onCancel={() => setDraftToDelete(null)}
+        onConfirm={() => confirmDraftDelete()}
+      />
     </div>
   );
 };

@@ -1,4 +1,5 @@
 import React from 'react';
+import { lastUpdatedLabel } from '../../utils/docs';
 import { 
   FileText, 
   Trash2, 
@@ -36,7 +37,7 @@ const SolidDocIcon = ({ color, size = 'md' }) => {
   );
 };
 
-const DocumentView = ({ docs = [], searchQuery = '', onActionClick, onRowClick, onDeleteDocument, onEditDocument }) => {
+const DocumentView = ({ docs = [], now, searchQuery = '', onActionClick, onRowClick, onDeleteDocument, onEditDocument }) => {
   const categories = [
     { name: 'Quotation', color: '#6366F1' },
     { name: 'Invoice', color: '#EF4444' },
@@ -99,7 +100,7 @@ const DocumentView = ({ docs = [], searchQuery = '', onActionClick, onRowClick, 
                     </div>
                   </td>
                   <td style={{ padding: '20px 0', color: '#4B5563', fontSize: '14px' }}>{doc.type}</td>
-                  <td style={{ padding: '20px 0', color: '#4B5563', fontSize: '14px' }}>{doc.edited}</td>
+                  <td style={{ padding: '20px 0', color: '#4B5563', fontSize: '14px' }}>{lastUpdatedLabel(doc, now)}</td>
                   <td style={{ padding: '20px 0', textAlign: 'right' }}>
                     <div className="action-buttons" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                       <button 

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { lastUpdatedLabel } from '../../utils/docs';
 import {
   ArrowLeft,
   FileText,
@@ -39,7 +40,7 @@ const SolidDocIcon = ({ color, size = 'sm' }) => {
   );
 };
 
-const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDoc }) => {
+const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDoc, now }) => {
   if (!isOpen) return null;
 
   return (
@@ -128,7 +129,7 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
               </div>
               <div style={{ flex: 1 }}>
                 <p style={{ fontSize: '13px', fontWeight: '600', color: '#111827', margin: 0 }}>{latestDoc ? latestDoc.name : 'No Previous Template'}</p>
-                <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0 }}>{latestDoc ? `Modified ${latestDoc.edited}` : 'Create your first template'}</p>
+                <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0 }}>{latestDoc ? `Modified ${lastUpdatedLabel(latestDoc, now)}` : 'Create your first template'}</p>
               </div>
               <div style={{ width: '18px', height: '18px', borderRadius: '50%', border: '2px solid #5D1CC9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#5D1CC9' }}></div>
@@ -235,7 +236,7 @@ const CreateQuotationModal = ({ isOpen, onClose, onSelect, onCreateNew, latestDo
   );
 };
 
-const QuotationView = ({ onBack, onSelectTemplate, onCreateNewTemplate, onOpenHistory, onDeleteDoc, docs = [] }) => {
+const QuotationView = ({ onBack, onSelectTemplate, onCreateNewTemplate, onOpenHistory, onDeleteDoc, docs = [], now }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const types = [
@@ -351,7 +352,7 @@ const QuotationView = ({ onBack, onSelectTemplate, onCreateNewTemplate, onOpenHi
                     </div>
                   </td>
                   <td style={{ padding: '20px 0', color: '#4B5563', fontSize: '14px' }}>{doc.type}</td>
-                  <td style={{ padding: '20px 0', color: '#4B5563', fontSize: '14px' }}>{doc.edited}</td>
+                  <td style={{ padding: '20px 0', color: '#4B5563', fontSize: '14px' }}>{lastUpdatedLabel(doc, now)}</td>
                   <td style={{ padding: '20px 0', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                       <button onClick={() => onDeleteDoc && onDeleteDoc(doc.id)} title="Move to trash" style={{ background: 'none', border: '1.5px solid #E5E7EB', borderRadius: '6px', padding: '6px', color: '#9CA3AF', cursor: 'pointer' }}><Trash2 size={18} /></button>
@@ -372,6 +373,7 @@ const QuotationView = ({ onBack, onSelectTemplate, onCreateNewTemplate, onOpenHi
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
         latestDoc={latestDoc}
+        now={now}
         onSelect={() => {
           setIsModalOpen(false);
           onSelectTemplate(latestDoc);

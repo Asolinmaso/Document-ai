@@ -274,6 +274,16 @@ export async function initSchema() {
     // Quotation form fields (company name, positions, fees, etc.) so drafts/history survive reloads server-side.
     // status also gains the 'draft' value alongside the existing 'active'/'trash'.
     try { await client.query(`ALTER TABLE documents ADD COLUMN quotation_data JSONB DEFAULT '{}'::jsonb`); } catch (e) {}
+    // Real timestamps so "last updated" can be shown dynamically (id is Date.now() at creation, so it backfills created_at).
+    try { await client.query(`ALTER TABLE documents ADD COLUMN created_at TIMESTAMPTZ`); } catch (e) {}
+    try { await client.query(`ALTER TABLE documents ADD COLUMN updated_at TIMESTAMPTZ`); } catch (e) {}
+    await client.query(`UPDATE documents SET created_at = to_timestamp(id / 1000.0) WHERE created_at IS NULL AND id > 1000000000000`);
+    await client.query(`UPDATE documents SET created_at = NOW() WHERE created_at IS NULL`);
+    await client.query(`UPDATE documents SET updated_at = created_at WHERE updated_at IS NULL`);
+    await client.query(`ALTER TABLE documents ALTER COLUMN created_at SET DEFAULT NOW()`);
+    await client.query(`ALTER TABLE documents ALTER COLUMN updated_at SET DEFAULT NOW()`);
+    // Widgets of a template built in the Template Editor, so the template can be re-opened and edited later.
+    try { await client.query(`ALTER TABLE documents ADD COLUMN template_elements JSONB`); } catch (e) {}
 
 
     console.log('PostgreSQL schema structure verified.');

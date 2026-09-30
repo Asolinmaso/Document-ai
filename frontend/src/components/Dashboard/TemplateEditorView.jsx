@@ -1,4 +1,5 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import {
   ArrowLeft,
   Bold,
@@ -19,6 +20,9 @@ import {
   Square,
 } from 'lucide-react';
 import { buildTemplatePdf, uint8ArrayToBase64, CANVAS_WIDTH_PX, CANVAS_HEIGHT_PX } from '../../utils/templateBuilder';
+import { importPdfAsTemplate } from '../../utils/templateImport';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
 
@@ -26,7 +30,7 @@ const WIDGETS = [
   { type: 'heading', label: 'Heading', icon: Heading1, defaults: { width: 460, height: 40, fontSize: 22, bold: true, italic: false, underline: false, align: 'left', color: '#111827', fontFamily: 'Helvetica', text: 'Heading Text' } },
   { type: 'text', label: 'Paragraph', icon: Type, defaults: { width: 460, height: 90, fontSize: 12, bold: false, italic: false, underline: false, align: 'left', color: '#111827', fontFamily: 'Helvetica', text: 'Add your paragraph text here…' } },
   { type: 'dateField', label: 'Date Field', icon: CalendarDays, defaults: { width: 180, height: 24, fontSize: 12, bold: true, italic: false, underline: false, align: 'left', color: '#111827', fontFamily: 'Helvetica' } },
-  { type: 'companyField', label: 'Company (To) Field', icon: Building2, defaults: { width: 280, height: 24, fontSize: 12, bold: true, italic: false, underline: false, align: 'left', color: '#111827', fontFamily: 'Helvetica' } },
+  { type: 'companyField', label: 'To Field', icon: Building2, defaults: { width: 280, height: 24, fontSize: 12, bold: true, italic: false, underline: false, align: 'left', color: '#111827', fontFamily: 'Helvetica' } },
   { type: 'table', label: 'Position Table', icon: Table2, defaults: { width: 734, height: 220, rows: 3, fontFamily: 'Helvetica' } },
   { type: 'image', label: 'Logo / Image', icon: ImageIcon, defaults: { width: 120, height: 120 } },
   { type: 'divider', label: 'Divider Line', icon: Minus, defaults: { width: 734, height: 2, color: '#111827' } },
@@ -119,7 +123,7 @@ const PropertiesPanel = ({ element, onUpdate, onDelete, onDuplicate, onUploadIma
         <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0 }}>Shows as "Date :" — the actual date is filled in automatically when a quotation is created from this template.</p>
       )}
       {element.type === 'companyField' && (
-        <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0 }}>Shows as "To :" — the client's company name is filled in automatically when a quotation is created from this template.</p>
+        <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0 }}>Shows as "To :" — the recipient typed in the quotation's "To" field is filled in automatically.</p>
       )}
 
       {isText && (
@@ -258,16 +262,44 @@ const WidgetBox = ({ element, isSelected, onPointerDown, onSelect }) => {
   );
 };
 
-const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template' }) => {
+/**
+ * Drag-and-drop template designer.
+ *  - create mode: starts empty, `onSave({ name, type, file, fileName, templateElements })` adds a new template.
+ *  - edit mode (`isEdit`): opens the widgets saved with the template (`initialElements`). A template that was
+ *    uploaded as a PDF has none, so its first page is converted to widgets from `sourceFile`.
+ */
+const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template', isEdit = false, initialElements = null, sourceFile = null }) => {
   const [templateName, setTemplateName] = useState(docName);
-  const [elements, setElements] = useState([]);
+  const [elements, setElements] = useState(() => (Array.isArray(initialElements) ? initialElements : []));
   const [selectedId, setSelectedId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const needsImport = isEdit && !Array.isArray(initialElements) && Boolean(sourceFile);
+  const [importing, setImporting] = useState(needsImport);
+  const [importFailed, setImportFailed] = useState(false);
   const imageInputRef = useRef(null);
   const canvasRef = useRef(null);
   const dragState = useRef(null);
 
   const selected = elements.find((e) => e.id === selectedId) || null;
+
+  useEffect(() => {
+    if (!needsImport) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const bytes = Uint8Array.from(atob(sourceFile.split(',')[1] || sourceFile), (c) => c.charCodeAt(0));
+        const imported = await importPdfAsTemplate(pdfjsLib, bytes);
+        if (!cancelled) setElements(imported);
+      } catch (err) {
+        console.error('Could not convert the PDF into editable widgets:', err);
+        if (!cancelled) setImportFailed(true);
+      } finally {
+        if (!cancelled) setImporting(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const addWidget = (widget) => {
     const id = `${widget.type}-${Date.now()}-${widgetSeq++}`;
@@ -354,15 +386,14 @@ const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template'
     try {
       const pdfBytes = await buildTemplatePdf(elements, { widthPx: CANVAS_WIDTH_PX, heightPx: CANVAS_HEIGHT_PX });
       const dataUrl = `data:application/pdf;base64,${uint8ArrayToBase64(pdfBytes)}`;
-      const newDoc = {
+      await onSave?.({
         name: templateName.trim(),
         type: 'Quotation',
-        edited: 'Just Now',
         file: dataUrl,
         fileName: `${templateName.trim()}.pdf`,
-      };
-      await onSave?.(newDoc);
-      onBack();
+        templateElements: elements,
+      });
+      if (!isEdit) onBack(); // edit mode: the parent navigates back to the quotation after saving
     } catch (err) {
       console.error('Failed to save template:', err);
       alert('Failed to save the template. Please try again.');
@@ -376,7 +407,7 @@ const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template'
 
       {/* Breadcrumb */}
       <div style={{ marginBottom: '16px', fontSize: '12px', color: '#6B7280', fontWeight: '500' }}>
-        Template &gt; Quotation &gt; {templateName || 'Untitled'}
+        {isEdit ? 'Quotation' : 'Template'} &gt; {isEdit ? 'Edit Template' : 'Quotation'} &gt; {templateName || 'Untitled'}
       </div>
 
       {/* Main Title Row */}
@@ -404,9 +435,21 @@ const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template'
           disabled={saving}
           style={{ background: '#5D1CC9', border: 'none', color: 'white', padding: '10px 24px', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1, boxShadow: '0 4px 10px rgba(93, 28, 201, 0.2)', flexShrink: 0 }}
         >
-          {saving ? 'Saving…' : 'Save Template'}
+          {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Save Template'}
         </button>
       </div>
+
+      {needsImport && !importing && !importFailed && (
+        <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#92400E', lineHeight: 1.5 }}>
+          This template was uploaded as a PDF, so it was converted into editable widgets. Please check the layout —
+          logos, images and exact colours can't be carried over. Saving stores it as an editable template from now on.
+        </div>
+      )}
+      {importFailed && (
+        <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#991B1B', lineHeight: 1.5 }}>
+          The uploaded PDF could not be converted. You can rebuild the layout from scratch; saving will replace the template file.
+        </div>
+      )}
 
       <input type="file" accept="image/png,image/jpeg" ref={imageInputRef} style={{ display: 'none' }} onChange={handleImageFile} />
 
@@ -430,7 +473,12 @@ const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template'
               flexShrink: 0,
             }}
           >
-            {elements.length === 0 && (
+            {importing && (
+              <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', fontSize: '14px' }}>
+                Converting the PDF into editable widgets…
+              </div>
+            )}
+            {!importing && elements.length === 0 && (
               <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', fontSize: '14px', textAlign: 'center', padding: '40px' }}>
                 Add widgets from the left panel to start designing your template.
               </div>
