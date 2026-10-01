@@ -30,6 +30,7 @@ import {
   Clock,
   FilePen,
   History,
+  Menu,
 } from 'lucide-react';
 import { useNow } from '../../hooks/useNow';
 import { isLiveDoc, isQuotationDoc, lastUpdatedLabel } from '../../utils/docs';
@@ -61,7 +62,7 @@ const SolidDocIcon = ({ color, size = 'md' }) => {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
-const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser, draftCount }) => {
+const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser, draftCount, open }) => {
   const menuItems = [
     { name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { name: 'Document', icon: <FileText size={18} /> },
@@ -75,7 +76,7 @@ const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser, draftCount }) =
   ];
 
   return (
-    <div className="sidebar" style={{ background: '#5D1CC9', display: 'flex', flexDirection: 'column' }}>
+    <nav id="app-sidebar" className="sidebar" aria-label="Main menu" aria-hidden={!open} inert={!open} style={{ background: '#5D1CC9', display: 'flex', flexDirection: 'column' }}>
       <div style={{ color: 'white', fontSize: '22px', fontWeight: '700', padding: '10px 20px', marginBottom: '30px', letterSpacing: '-0.5px' }}>
         DocAI
       </div>
@@ -120,15 +121,27 @@ const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser, draftCount }) =
           <LogOut size={14} /> Sign out
         </button>
       </div>
-    </div>
+    </nav>
   );
 };
 
 // ── Topbar ────────────────────────────────────────────────────────────────────
 
-const Topbar = ({ searchQuery, onSearchChange, title, profileData }) => (
+const Topbar = ({ searchQuery, onSearchChange, title, profileData, sidebarOpen, onToggleSidebar }) => (
   <div className="top-bar">
-    <h2 style={{ fontSize: '18px', fontWeight: '700' }}>{title}</h2>
+    <div className="top-bar-title">
+      <button
+        type="button"
+        className="menu-toggle"
+        onClick={onToggleSidebar}
+        aria-label={sidebarOpen ? 'Hide menu' : 'Show menu'}
+        aria-expanded={sidebarOpen}
+        aria-controls="app-sidebar"
+      >
+        <Menu size={20} />
+      </button>
+      <h2 style={{ fontSize: '18px', fontWeight: '700' }}>{title}</h2>
+    </div>
     <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
       <div className="search-container">
         <Search size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.5)', pointerEvents: 'none' }} />
@@ -141,7 +154,7 @@ const Topbar = ({ searchQuery, onSearchChange, title, profileData }) => (
         />
       </div>
       {profileData?.companyName && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className="top-bar-company" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div style={{ width: '36px', height: '36px', background: 'rgba(255,255,255,0.15)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
             <img src="/mabs-logo.png" alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '4px' }} onError={(e) => { e.target.style.display = 'none'; }} />
           </div>
@@ -365,6 +378,26 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
   const [deletingDraft, setDeletingDraft] = useState(false);
   const now = useNow();
 
+  // Side menu: a hamburger in the top bar shows / hides it. On narrow screens it slides over the page
+  // (and closes again after a choice); on wide screens it pushes the page and the choice is remembered.
+  const isNarrow = () => window.matchMedia('(max-width: 900px)').matches;
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (isNarrow()) return false;
+    try { return localStorage.getItem('sidebarOpen') !== '0'; } catch { return true; }
+  });
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((open) => {
+      if (!isNarrow()) { try { localStorage.setItem('sidebarOpen', open ? '0' : '1'); } catch { /* storage blocked */ } }
+      return !open;
+    });
+  }, []);
+  useEffect(() => {
+    if (!sidebarOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape' && isNarrow()) setSidebarOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [sidebarOpen]);
+
   const [profileData, setProfileData] = useState(null);
   const [companyLogos, setCompanyLogos] = useState([]);
   const [allDocs, setAllDocs] = useState([]);
@@ -573,6 +606,7 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
     setSelectedDoc(null);
     setDashboardMode(null);
     setEditorPreview(false);
+    if (isNarrow()) setSidebarOpen(false);
   };
 
   // ── Derived Data ──────────────────────────────────────────────────────────
@@ -798,20 +832,24 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
   };
 
   return (
-    <div className="dashboard-layout">
+    <div className={`dashboard-layout${sidebarOpen ? '' : ' sidebar-closed'}`}>
       <Sidebar
+        open={sidebarOpen}
         activeTab={activeTab}
         onTabClick={handleTabClick}
         onLogout={onLogout}
         currentUser={currentUser}
         draftCount={draftDocs.length}
       />
+      <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
       <div className="main-content">
         <Topbar
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           title={topbarTitle}
           profileData={profileData}
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={toggleSidebar}
         />
         <div style={{ flex: 1, overflowX: 'auto', overflowY: 'auto', display: 'flex', flexDirection: 'column', background: currentSubView === 'editor' ? '#FFFFFF' : 'transparent' }}>
           {renderContent()}
