@@ -65,7 +65,7 @@ const Signup = ({ onLoginClick, onSignupSuccess }) => {
         <FormField id="signup-name" label="Full name" placeholder="Jane Doe" autoComplete="name" autoFocus error={shown('name')} {...bind('name')} />
         <FormField id="signup-email" label="Email address" type="email" placeholder="you@company.com" autoComplete="email" error={shown('email')} {...bind('email')} />
         <PasswordField id="signup-password" label="Password" placeholder="Create a password" autoComplete="new-password" error={shown('password')} {...bind('password')}>
-          {(touched.password || values.password) && <PasswordRequirements password={values.password} />}
+          {values.password && <PasswordRequirements password={values.password} />}
         </PasswordField>
         <PasswordField id="signup-confirm-password" label="Confirm password" placeholder="Re-enter your password" autoComplete="new-password" error={shown('confirmPassword')} {...bind('confirmPassword')}>
           {values.confirmPassword && !shown('confirmPassword') && (

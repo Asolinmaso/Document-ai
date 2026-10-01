@@ -160,7 +160,7 @@ h1, h2, h3, h4, .logo {
 }
 .auth-alert svg { flex-shrink: 0; margin-top: 1px; }
 
-.form-group { margin-bottom: 18px; position: relative; }
+.form-group { margin-bottom: 2px; position: relative; }
 .form-group > label,
 .field-label {
   display: block;
@@ -215,8 +215,10 @@ h1, h2, h3, h4, .logo {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
+  min-height: 16px; /* reserved even when empty, so messages never shift the layout */
+  margin: 4px 0 2px;
   font-size: 12px;
+  line-height: 16px;
   color: #DC2626;
 }
 

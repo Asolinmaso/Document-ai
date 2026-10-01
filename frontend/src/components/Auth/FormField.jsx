@@ -9,6 +9,14 @@ export const FormAlert = ({ children }) =>
     </div>
   ) : null;
 
+// Always rendered (its height is reserved in CSS): a message appearing on blur must not move the buttons
+// below it, or the click that caused the blur misses its target.
+const FieldError = ({ id, error }) => (
+  <div className="field-error" id={`${id}-error`} role={error ? 'alert' : undefined}>
+    {error && <><AlertCircle size={13} />{error}</>}
+  </div>
+);
+
 /** Labelled input with an inline validation message. `action` renders on the label row (e.g. "Forgot password?"). */
 export const FormField = ({ id, label, error, action, type = 'text', ...inputProps }) => (
   <div className="form-group">
@@ -24,7 +32,7 @@ export const FormField = ({ id, label, error, action, type = 'text', ...inputPro
       aria-describedby={error ? `${id}-error` : undefined}
       {...inputProps}
     />
-    {error && <div className="field-error" id={`${id}-error`}><AlertCircle size={13} />{error}</div>}
+    <FieldError id={id} error={error} />
   </div>
 );
 
@@ -50,7 +58,7 @@ export const PasswordField = ({ id, label, error, action, children, ...inputProp
           {visible ? <EyeOff size={18} /> : <Eye size={18} />}
         </button>
       </div>
-      {error && <div className="field-error" id={`${id}-error`}><AlertCircle size={13} />{error}</div>}
+      <FieldError id={id} error={error} />
       {children}
     </div>
   );
