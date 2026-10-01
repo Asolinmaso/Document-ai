@@ -5,6 +5,7 @@ import { restoreTemplate } from '../../utils/templateRestore';
 import { downloadPdf, statusMeta } from '../../utils/docs';
 import { sendMail } from '../../services/dataService';
 import ConfirmDialog from '../ConfirmDialog';
+import PdfPage from './PdfPage';
 import QuotationSendModal from './QuotationSendModal';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 import {
@@ -29,59 +30,6 @@ import {
 } from 'lucide-react';
 
 const EMPTY_POSITION_FORM = { role: '', positions: '', qualifications: '', package: '' };
-
-const PdfPage = memo(({ pdfDoc, pageNum, width, height }) => {
-  const canvasRef = React.useRef(null);
-
-  React.useEffect(() => {
-    if (!pdfDoc) return;
-    let renderTask = null;
-
-    const renderPage = async () => {
-      try {
-        const page = await pdfDoc.getPage(pageNum);
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const context = canvas.getContext('2d');
-        const dpr = window.devicePixelRatio || 1;
-
-        canvas.width = width * dpr;
-        canvas.height = height * dpr;
-        canvas.style.width = `${width}px`;
-        canvas.style.height = `${height}px`;
-
-        const viewport = page.getViewport({ scale: 1.0 });
-        const scaleX = (width * dpr) / viewport.width;
-        const scaleY = (height * dpr) / viewport.height;
-        const transform = [scaleX, 0, 0, scaleY, 0, 0];
-
-        context.clearRect(0, 0, canvas.width, canvas.height);
-
-        renderTask = page.render({
-          canvasContext: context,
-          viewport: viewport,
-          transform: transform
-        });
-        await renderTask.promise;
-      } catch (err) {
-        if (err.name !== 'RenderingCancelledException' && err.message !== 'Rendering cancelled, closed or replaced') {
-          console.error(`Error rendering page ${pageNum}:`, err);
-        }
-      }
-    };
-
-    renderPage();
-
-    return () => {
-      if (renderTask) {
-        renderTask.cancel();
-      }
-    };
-  }, [pdfDoc, pageNum, width, height]);
-
-  return <canvas ref={canvasRef} style={{ display: 'block' }} />;
-});
 
 // Isolated so that typing in the "Edit Data" fields (parent state) never has to reconcile the
 // PDF canvas / iframe subtree. It only re-renders when the document actually changes: on mode
@@ -547,7 +495,8 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
         pdfBytes,
         analysis,
         values,
-        values
+        values,
+        { templateEdits: doc?.templateEdits || undefined }
       );
       if (myRun !== runId.current && !forDownload) return null; // a newer edit superseded this run
 
@@ -618,6 +567,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
         type: doc.type || 'Quotation',
         file: dataUrl || doc.file || '',
         ...(templateData ? { templateFile: templateData } : {}),
+        ...(doc.templateEdits ? { templateEdits: doc.templateEdits } : {}),
         ...(doc.templateElements ? { templateElements: doc.templateElements } : {}),
       });
       try { localStorage.removeItem(storageKey); } catch { /* storage blocked */ }

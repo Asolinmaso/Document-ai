@@ -9,6 +9,7 @@ import ProfileView from './ProfileView';
 import TrashView from './TrashView';
 import TemplateView from './TemplateView';
 import TemplateEditorView from './TemplateEditorView';
+import TemplateTextEditorView from './TemplateTextEditorView';
 import MailCenterView from './MailCenterView';
 import ExtractionView from './ExtractionView';
 import {
@@ -511,7 +512,7 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
   // Template Editor "Save Changes": update the template file + its widgets, then return to the quotation.
   const handleSaveTemplateEdit = useCallback(async (id, data) => {
     await handleSaveQuotation(id, data);
-    showToast?.('Template updated. Preview to see your changes.', 'success');
+    showToast?.('Template updated.', 'success');
     setCurrentSubView('editor');
   }, [handleSaveQuotation, showToast]);
 
@@ -639,6 +640,19 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
         />
       );
     }
+    // An uploaded PDF template is edited in place on its real pages; only templates that were built from
+    // widgets in the Template Editor go back to that editor.
+    if (currentSubView === 'template_edit' && selectedDoc && !Array.isArray(selectedDoc.templateElements)) {
+      return (
+        <TemplateTextEditorView
+          key={selectedDoc.id}
+          doc={selectedDoc}
+          onBack={() => setCurrentSubView('editor')}
+          onSave={(data) => handleSaveTemplateEdit(selectedDoc.id, data)}
+          showToast={showToast}
+        />
+      );
+    }
     if (currentSubView === 'template_edit' && selectedDoc) {
       return (
         <TemplateEditorView
@@ -648,7 +662,7 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
           initialElements={selectedDoc.templateElements || null}
           sourceFile={selectedDoc.templateFile || selectedDoc.file}
           onBack={() => setCurrentSubView('editor')}
-          onSave={(data) => handleSaveTemplateEdit(selectedDoc.id, { name: data.name, file: data.file, templateFile: data.file, templateElements: data.templateElements })}
+          onSave={(data) => handleSaveTemplateEdit(selectedDoc.id, { name: data.name, file: data.file, templateFile: data.file, templateEdits: null, templateElements: data.templateElements })}
         />
       );
     }

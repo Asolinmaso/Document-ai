@@ -505,3 +505,29 @@ td {
 .icon-btn:hover {
   color: var(--primary);
 }
+
+/* Template text editor: clickable text blocks laid over the rendered PDF page */
+.tpl-block {
+  position: absolute;
+  padding: 0;
+  background: transparent;
+  border: 1.5px dashed transparent;
+  border-radius: 4px;
+  cursor: text;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.tpl-block:hover,
+.tpl-block:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  background: rgba(93, 28, 201, 0.07);
+}
+.tpl-block.is-edited {
+  border-color: #F59E0B;
+  background: rgba(245, 158, 11, 0.08);
+}
+.tpl-block.is-selected {
+  border-style: solid;
+  border-color: var(--primary);
+  background: rgba(93, 28, 201, 0.1);
+}

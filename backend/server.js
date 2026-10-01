@@ -426,7 +426,7 @@ app.post('/api/logos', authenticateToken, async (req, res) => {
 // --- DOCUMENTS ROUTES ---
 
 // Column aliases shared by every documents query so the client always gets camelCase fields + timestamps.
-const DOC_RETURNING = 'quotation_data AS "quotationData", template_elements AS "templateElements", template_file AS "templateFile", created_at AS "createdAt", updated_at AS "updatedAt"';
+const DOC_RETURNING = 'quotation_data AS "quotationData", template_elements AS "templateElements", template_file AS "templateFile", template_edits AS "templateEdits", created_at AS "createdAt", updated_at AS "updatedAt"';
 
 app.get('/api/documents', authenticateToken, async (req, res) => {
   try {
@@ -440,15 +440,15 @@ app.get('/api/documents', authenticateToken, async (req, res) => {
 
 app.post('/api/documents', authenticateToken, async (req, res) => {
   try {
-    const { name, type, edited, file, status, quotationData, templateElements, templateFile } = req.body;
+    const { name, type, edited, file, status, quotationData, templateElements, templateFile, templateEdits } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Document name is required.' });
 
     const id = Date.now();
 
     const result = await pool.query(
-      `INSERT INTO documents (id, name, type, edited, file, status, quotation_data, template_elements, template_file, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW()) RETURNING *, ${DOC_RETURNING}`,
-      [id, name.trim(), type || '', edited || '', file || '', status || 'active', JSON.stringify(quotationData || {}), templateElements ? JSON.stringify(templateElements) : null, templateFile || null]
+      `INSERT INTO documents (id, name, type, edited, file, status, quotation_data, template_elements, template_file, template_edits, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()) RETURNING *, ${DOC_RETURNING}`,
+      [id, name.trim(), type || '', edited || '', file || '', status || 'active', JSON.stringify(quotationData || {}), templateElements ? JSON.stringify(templateElements) : null, templateFile || null, templateEdits ? JSON.stringify(templateEdits) : null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -485,6 +485,12 @@ app.put('/api/documents/:id', authenticateToken, async (req, res) => {
     if (req.body.templateElements !== undefined) {
       fields.push(`template_elements = $${valIdx}`);
       values.push(req.body.templateElements ? JSON.stringify(req.body.templateElements) : null);
+      valIdx++;
+    }
+
+    if (req.body.templateEdits !== undefined) {
+      fields.push(`template_edits = $${valIdx}`);
+      values.push(req.body.templateEdits ? JSON.stringify(req.body.templateEdits) : null);
       valIdx++;
     }
 

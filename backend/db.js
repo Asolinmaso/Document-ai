@@ -287,6 +287,8 @@ export async function initSchema() {
     // The untouched template a quotation is generated from. `file` holds the filled result; every new fill
     // starts from this copy so values are never written on top of an already filled PDF.
     try { await client.query(`ALTER TABLE documents ADD COLUMN template_file TEXT`); } catch (e) {}
+    // Wording changed in the template editor ({ blockId: styled runs }), applied on top of template_file at fill time.
+    try { await client.query(`ALTER TABLE documents ADD COLUMN template_edits JSONB`); } catch (e) {}
 
 
     console.log('PostgreSQL schema structure verified.');

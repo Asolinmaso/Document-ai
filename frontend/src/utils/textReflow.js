@@ -24,9 +24,10 @@ export const segmentLines = (lines) => {
   const out = [];
   lines.forEach((line) => {
     let seg = [];
+    const made = [];
     const flush = () => {
       if (!seg.length) return;
-      out.push({
+      made.push({
         y: line.y,
         page: line.page,
         items: seg,
@@ -40,10 +41,13 @@ export const segmentLines = (lines) => {
     };
     line.items.forEach((item) => {
       const prev = seg[seg.length - 1];
-      if (prev && item.transform[4] - (prev.transform[4] + prev.width) > Math.max(24, fontSizeOf(item) * 2.2)) flush();
+      if (prev && item.transform[4] - (prev.transform[4] + prev.width) > Math.max(14, fontSizeOf(item) * 1.3)) flush();
       seg.push(item);
     });
     flush();
+    // several blocks side by side on one line: table cells / labels, which are set around their own centre
+    if (made.length > 1) made.forEach((m) => { m.cell = true; });
+    out.push(...made);
   });
   return out.sort((a, b) => b.y - a.y || a.minX - b.minX);
 };
@@ -122,13 +126,19 @@ const columnChain = (lines, L, keyOf, tol) => {
 };
 
 /** The paragraph (or centred block, e.g. a table cell) a line belongs to. `lines` are top to bottom. */
-const groupOf = (lines, L) => {
+const groupOf = (lines, L, page = {}) => {
   const leftCol = columnChain(lines, L, (l) => l.minX, 3);
   if (leftCol.chain.length < 2) {
     const centre = (l) => (l.minX + l.maxX) / 2;
-    const mid = columnChain(lines, L, centre, 1.5);
+    const mid = columnChain(lines, L, centre, 2.5);
     if (mid.chain.length > 1) {
       return { mode: 'center', lines: mid.chain, pitch: mid.pitch, centre: centre(L), width: Math.max(...mid.chain.map((l) => l.maxX - l.minX)) };
+    }
+    const width = L.maxX - L.minX;
+    // a single line: a table cell keeps its own centre, a heading in the middle of the page stays centred
+    if (L.cell) return { mode: 'center', lines: [L], pitch: mid.pitch, centre: centre(L), width, maxWidth: width * 1.25 + 16 };
+    if (page.width && Math.abs(centre(L) - page.centreX) <= 3 && width < page.width * 0.7) {
+      return { mode: 'center', lines: [L], pitch: mid.pitch, centre: page.centreX, width, maxWidth: page.width - 80 };
     }
   }
   const { chain, pitch } = leftCol;
@@ -150,15 +160,31 @@ const groupOf = (lines, L) => {
   return { mode: 'left', lines: group, pitch, left, right, justified };
 };
 
+/** Every paragraph / heading / cell of a page, top to bottom (each line belongs to exactly one block). */
+export const listBlocks = (lines, page) => {
+  const seen = new Set();
+  const blocks = [];
+  lines.forEach((L) => {
+    if (seen.has(L)) return;
+    const g = groupOf(lines, L, page);
+    g.lines = g.lines.filter((l) => !seen.has(l));
+    g.lines.forEach((l) => seen.add(l));
+    blocks.push(g);
+  });
+  return blocks;
+};
+
 /* ── typesetting ──────────────────────────────────────────────────────── */
 
-const colorKey = (c) => `${Math.round(c.r * 31)},${Math.round(c.g * 31)},${Math.round(c.b * 31)}`;
+const colorKey = (c) => (c ? `${Math.round(c.r * 31)},${Math.round(c.g * 31)},${Math.round(c.b * 31)}` : 'none');
 
 /**
  * @param page   pdf-lib page
  * @param lines  segmented lines of the page (top to bottom) — the array `chars` was built from
+ * @param edits  [{ s, e, text }] replaces a span with a value; [{ s, e, runs, group }] rewrites a whole block with
+ *               styled runs [{ text, bold, italic, color }] (template editing)
  * @param ctx    { font(family, bold, italic), safe(text, font), value: { family, bold, italic, color }, defaultColor,
- *                 bannerY, banner, warnings }
+ *                 bannerY, banner, warnings, page: { width, centreX } }
  */
 export function applyEdits(page, lines, chars, edits, ctx) {
   if (!edits.length) return;
@@ -175,7 +201,7 @@ export function applyEdits(page, lines, chars, edits, ctx) {
   const groups = new Map();
   const groupFor = (L) => {
     if (!groups.has(L)) {
-      const g = groupOf(lines, L);
+      const g = groupOf(lines, L, ctx.page);
       g.lines.forEach((l) => { if (!groups.has(l)) groups.set(l, g); });
       groups.set(L, g);
     }
@@ -183,6 +209,10 @@ export function applyEdits(page, lines, chars, edits, ctx) {
   };
   const blocks = new Map();
   edits.forEach((ed) => {
+    if (ed.group) { // a whole block, already identified by the caller
+      blocks.set(ed.group, { g: ed.group, i0: 0, i1: ed.group.lines.length - 1, edits: [ed] });
+      return;
+    }
     const first = lines[chars[ed.s].line];
     const lastLine = lines[chars[ed.e - 1].line];
     const g = groupFor(first);
@@ -267,7 +297,7 @@ function planBlock(block, env) {
       if (!cur) cur = { segs: [], custom: false };
       if (custom) cur.custom = true;
       const lastSeg = cur.segs[cur.segs.length - 1];
-      if (lastSeg && lastSeg.font === style.font && lastSeg.size === style.size && lastSeg.custom === Boolean(custom) && (custom || colorKey(lastSeg.color) === colorKey(style.color))) lastSeg.text += text;
+      if (lastSeg && lastSeg.font === style.font && lastSeg.size === style.size && lastSeg.custom === Boolean(custom) && colorKey(lastSeg.color) === colorKey(style.color)) lastSeg.text += text;
       else cur.segs.push({ ...style, text, custom: Boolean(custom) });
     };
     for (let li = a; li <= b; li++) {
@@ -276,8 +306,18 @@ function planBlock(block, env) {
         const c = chars[i];
         const ed = editAt.get(i);
         if (ed) {
-          const style = { font: valueFont, size: fontSizeOf(c.item), color: null };
-          ctx.safe(ed.text, valueFont).split(/\s+/).filter(Boolean).forEach((w, k) => { if (k > 0) end(); push(w, style, true); });
+          const runSize = fontSizeOf(c.item);
+          if (ed.runs) {
+            ed.runs.forEach((run) => {
+              // `run.value`: a quotation value inside rewritten template text, styled like any other value
+              const f = run.value ? valueFont : ctx.font(family, run.bold, run.italic);
+              const style = { font: f, size: runSize, color: run.value ? null : run.color || null };
+              for (const ch of ctx.safe(run.text, f)) { if (/\s/.test(ch)) end(); else push(ch, style, true); }
+            });
+          } else {
+            const style = { font: valueFont, size: runSize, color: null };
+            ctx.safe(ed.text, valueFont).split(/\s+/).filter(Boolean).forEach((w, k) => { if (k > 0) end(); push(w, style, true); });
+          }
           skipUntil = ed.e;
           i = ed.e - 1;
           continue;
@@ -303,12 +343,13 @@ function planBlock(block, env) {
     }));
     const around = [...colours.values()].sort((x, y) => y.n - x.n)[0]?.color;
     const valueColor = ctx.value.color || around || ctx.defaultColor;
-    words.forEach((w) => { w.segs.forEach((s) => { if (s.custom) s.color = valueColor; }); measure(w); });
+    words.forEach((w) => { w.segs.forEach((s) => { if (s.custom && !s.color) s.color = valueColor; }); measure(w); });
     return words;
   };
 
   const rowWidth = (a, r) => {
-    if (g.mode === 'center') return Math.max(g.width * 1.2, g.width + 24);
+    // centred text (table cells) may grow a little past its widest line, never far enough to leave the cell
+    if (g.mode === 'center') return g.maxWidth ?? g.width + 16;
     const line = g.lines[a + r];
     return g.right - (line ? startX.get(line) : g.left);
   };
@@ -367,7 +408,9 @@ function planBlock(block, env) {
     shortened = true;
     rows = wrap(words, i0);
   }
-  if (shortened) ctx.warnings.add('A value was too long for its place in the template and was shortened.');
+  if (shortened) ctx.warnings.add(block.edits.some((ed) => ed.runs)
+    ? 'Some text is too long for the space it has in the template and was cut. Shorten it to make it fit.'
+    : 'A value was too long for its place in the template and was shortened.');
 
   for (let li = i0; li <= Math.min(i1, lastIdx); li++) {
     const line = g.lines[li];

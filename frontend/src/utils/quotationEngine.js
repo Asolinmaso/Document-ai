@@ -1,6 +1,6 @@
 import { PDFDocument, PDFName, PDFBool, rgb } from 'pdf-lib';
 import { createFontBook, describeFontName, makeSafeText } from './pdfFonts';
-import { applyEdits, buildStream, findEdits, fontSizeOf, segmentLines } from './textReflow';
+import { applyEdits, buildStream, findEdits, fontSizeOf, listBlocks, segmentLines } from './textReflow';
 import { CONTINUATION_KEY } from './templateRestore';
 
 /**
@@ -232,7 +232,11 @@ const backgroundRuns = (img, scale, pageH, origin, x0Pt, x1Pt, yTopPt, yBottomPt
   return runs.map(({ x0: a, x1: b, color }) => ({ x0: a, x1: b, color }));
 };
 
-export async function analyzeTemplate(pdfjsLib, pdfBytes, { rasterize = defaultRasterize } = {}) {
+/**
+ * @param options.allColours  read text colours / backgrounds on every page (template editing), not only on
+ *                            the pages that can receive a value
+ */
+export async function analyzeTemplate(pdfjsLib, pdfBytes, { rasterize = defaultRasterize, allColours = false } = {}) {
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) }).promise;
   const pdfLines = [];
   const tables = [];
@@ -292,7 +296,7 @@ export async function analyzeTemplate(pdfjsLib, pdfBytes, { rasterize = defaultR
       }
     }
 
-    if (BODY_TRIGGER.test(pageText)) {
+    if (allColours || BODY_TRIGGER.test(pageText)) {
       try {
         const img = await getRaster();
         items.forEach((item) => {
@@ -663,7 +667,8 @@ const addContinuationPages = async (pdfDoc, job, ctx) => {
  * @param analysis  result of analyzeTemplate() for the same bytes
  * @param values    { date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions }
  * @param style     { valueFont: 'auto' | 'Helvetica' | 'Times New Roman', isBold, isItalic, textColor }
- * @param options   { fontLoader } – override how bundled font files are fetched (tests)
+ * @param options   { templateEdits } – wording changed in the template editor: { [blockId]: runs }
+ *                  { fontLoader } – override how bundled font files are fetched (tests)
  */
 export async function fillQuotation(pdfBytes, analysis, values, style = {}, options = {}) {
   const warnings = new Set();
@@ -692,13 +697,26 @@ export async function fillQuotation(pdfBytes, analysis, values, style = {}, opti
 
   // 1. find what has to change on each page (no fonts needed yet)
   const pages = pdfDoc.getPages();
+  const templateEdits = options.templateEdits || {};
+  const hasTemplateEdits = Object.keys(templateEdits).length > 0;
   const plans = pages.map((page, p) => {
     const rawLines = analysis.pdfLines.filter((l) => l.page === p + 1);
-    const lines = segmentLines(rawLines);
-    const chars = buildStream(lines);
     const pageY0 = page.getMediaBox().y;
     const { width: pageW, height: pageH } = page.getSize();
-    return { rawLines, lines, chars, edits: findEdits(chars, replacements), pageW, pageH, pageY0, bannerY: pageY0 + pageH * BANNER_RATIO };
+    const geometry = { rawLines, pageW, pageH, pageY0, pageX0: page.getMediaBox().x, bannerY: pageY0 + pageH * BANNER_RATIO };
+    if (!hasTemplateEdits) {
+      const lines = segmentLines(rawLines);
+      const chars = buildStream(lines);
+      return { ...geometry, lines, chars, edits: findEdits(chars, replacements) };
+    }
+    // Blocks whose wording was changed in the template editor are rewritten as a whole (with the values
+    // filled into the new wording); the value patterns then only run over the untouched rest of the page.
+    const { lines, chars, blocks } = pageBlocks(analysis, p);
+    const rewritten = blocks.filter((b) => b.editable && templateEdits[b.id]);
+    const rewrittenLines = new Set(rewritten.flatMap((b) => b.group.lines));
+    const edits = findEdits(chars, replacements).filter((ed) => !rewrittenLines.has(lines[chars[ed.s].line]) && !rewrittenLines.has(lines[chars[ed.e - 1].line]));
+    rewritten.forEach((b) => edits.push({ s: b.s, e: b.e, group: b.group, runs: fillRuns(templateEdits[b.id], replacements) }));
+    return { ...geometry, lines, chars, edits };
   });
 
   // 2. embed the fonts those changes need: the typefaces of the lines being re-typeset
@@ -706,6 +724,9 @@ export async function fillQuotation(pdfBytes, analysis, values, style = {}, opti
   const want = (family, bold, italic) => wanted.push({ family: !family || family === 'other' ? 'helvetica' : family, bold: Boolean(bold), italic: Boolean(italic) });
   if (valueFamily !== 'auto') { want(valueFamily, isBold, isItalic); want(valueFamily, true, isItalic); }
   plans.forEach((plan) => {
+    plan.edits.forEach((ed) => (ed.runs || []).forEach((run) => {
+      ed.group.lines.forEach((l) => l.items.forEach((i) => want(i.family, run.bold, run.italic)));
+    }));
     if (plan.edits.length) {
       plan.lines.forEach((l) => l.items.forEach((i) => { want(i.family, i.bold, i.italic); want(i.family, false, false); want(i.family, isBold, isItalic); }));
     }
@@ -725,7 +746,14 @@ export async function fillQuotation(pdfBytes, analysis, values, style = {}, opti
   // 3. write
   const continuations = [];
   let sourceDoc = null;
-  const ctxOf = (plan) => ({ font, safe, value, warnings, banner, pageW: plan.pageW, bannerY: plan.bannerY, defaultColor: hexToRgb(textColor), headerColor: hexToRgb(textColor) });
+  const ctxOf = (plan) => ({
+    font, safe, value, warnings, banner,
+    pageW: plan.pageW,
+    page: { width: plan.pageW, centreX: plan.pageX0 + plan.pageW / 2 },
+    bannerY: plan.bannerY,
+    defaultColor: hexToRgb(textColor),
+    headerColor: hexToRgb(textColor),
+  });
   // `p` is the page's index in the template, whose text lines describe the header
   const fillHeader = (page, p) => {
     try { fillHeaderFields(page, plans[p].rawLines, { date: clean.date, recipient: clean.recipient }, ctxOf(plans[p])); } catch (e) { console.error('Header fill failed:', e); }
@@ -762,5 +790,166 @@ export async function fillQuotation(pdfBytes, analysis, values, style = {}, opti
     const shown = [...unsupported].slice(0, 6).join(' ');
     warnings.add(`Some characters (${shown}${unsupported.size > 6 ? ' …' : ''}) cannot be printed in the PDF font and were replaced by "?".`);
   }
+  return { bytes: await pdfDoc.save(), warnings: [...warnings] };
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Template editing: rewrite the wording of the template itself
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Blocks of one page with their place in the character stream. Shared by the listing and the rewrite. */
+const pageBlocks = (analysis, p) => {
+  const size = analysis.pageSizes[p];
+  const lines = segmentLines(analysis.pdfLines.filter((l) => l.page === p + 1));
+  const chars = buildStream(lines);
+  const range = lines.map(() => null);
+  chars.forEach((c, i) => { if (range[c.line]) range[c.line][1] = i + 1; else range[c.line] = [i, i + 1]; });
+  const bannerY = size.y + size.height * BANNER_RATIO;
+  const footerY = size.y + size.height * FOOTER_RATIO;
+
+  const blocks = listBlocks(lines, { width: size.width, centreX: size.x + size.width / 2 }).map((g, index) => {
+    const first = g.lines[0];
+    const last = g.lines[g.lines.length - 1];
+    // leading symbols in a font we cannot reproduce (bullets, arrows) are not part of the editable text
+    const lead = first.items.findIndex((i, k) => i.family !== 'other' || k === first.items.length - 1);
+    const [from] = range[lines.indexOf(first)];
+    let s = from;
+    while (s < chars.length && chars[s].item !== first.items[lead]) s++;
+    let e = range[lines.indexOf(last)][1];
+    while (e > s && !chars[e - 1].item) e--;
+
+    const items = g.lines.flatMap((l) => l.items);
+    // The Date / To lines are filled per quotation; the footer is light text on a dark band whose colours cannot be read back.
+    const editable = first.y <= bannerY && last.y >= footerY && items.some((i) => i.family !== 'other');
+    return {
+      id: `${p + 1}:${index}`, page: p + 1, group: g, s, e, editable,
+      box: {
+        x0: Math.min(...g.lines.map((l) => l.minX)),
+        x1: Math.max(...g.lines.map((l) => l.maxX)),
+        yTop: first.base + first.height * 0.95,
+        yBottom: last.base - last.height * 0.3,
+      },
+    };
+  });
+  return { lines, chars, blocks, range, size, bannerY };
+};
+
+/**
+ * Applies the value patterns to rewritten template text. Returns the runs with every match replaced by a
+ * `{ value: true }` run, so "xx%" typed into an edited paragraph is still filled in like in the original.
+ */
+const fillRuns = (runs, replacements) => {
+  const text = runs.map((r) => r.text).join('');
+  const owner = [];
+  runs.forEach((r, k) => { for (let i = 0; i < r.text.length; i++) owner.push(k); });
+  const taken = new Array(text.length).fill(null);
+  replacements.forEach(({ re, group, text: value }) => {
+    const rx = new RegExp(re.source, re.flags.includes('d') ? re.flags : `${re.flags}d`);
+    let m;
+    while ((m = rx.exec(text)) !== null) {
+      if (m[0].length === 0) { rx.lastIndex++; continue; }
+      let s = m.index;
+      let e = m.index + m[0].length;
+      if (group) {
+        if (!m.indices?.[group]) continue;
+        [s, e] = m.indices[group];
+      }
+      while (s < e && /\s/.test(text[s])) s++;
+      while (e > s && /\s/.test(text[e - 1])) e--;
+      if (s >= e || taken.slice(s, e).some(Boolean)) continue;
+      const mark = { value, s };
+      for (let i = s; i < e; i++) taken[i] = mark;
+    }
+  });
+  const out = [];
+  for (let i = 0; i < text.length; i++) {
+    const mark = taken[i];
+    if (mark) {
+      if (i === mark.s) out.push({ text: mark.value, value: true });
+      continue;
+    }
+    const src = runs[owner[i]];
+    const lastRun = out[out.length - 1];
+    if (lastRun && lastRun.src === src) lastRun.text += text[i];
+    else out.push({ ...src, text: text[i], src });
+  }
+  return out.map(({ src, ...run }) => run);
+};
+
+/**
+ * The editable text blocks of a template: [{ id, page, box, runs }] where `runs` is the block's text as
+ * styled runs [{ text, bold, italic, color }]. `box` is in PDF points (origin bottom-left).
+ */
+export const listTemplateBlocks = (analysis) => analysis.pageSizes.flatMap((_, p) => {
+  const { lines, chars, blocks, range } = pageBlocks(analysis, p);
+  return blocks.filter((b) => b.editable).map(({ id, page, box, group, s, e }) => {
+    const runs = [];
+    // only the block's own lines: other blocks on the same height sit between them in the stream
+    group.lines.forEach((line) => {
+      const [from, to] = range[lines.indexOf(line)];
+      for (let i = Math.max(from, s); i < Math.min(to, e); i++) {
+        const c = chars[i];
+        const lastRun = runs[runs.length - 1];
+        if (!c.item) {
+          if (!c.glue && lastRun && !/\s$/.test(lastRun.text)) lastRun.text += ' '; // item gap or line break
+          continue;
+        }
+        if (c.item.family === 'other') continue;
+        const style = { bold: Boolean(c.item.bold), italic: Boolean(c.item.italic), color: c.item.color || null };
+        const same = lastRun && lastRun.bold === style.bold && lastRun.italic === style.italic && JSON.stringify(lastRun.color) === JSON.stringify(style.color);
+        if (same) lastRun.text += c.ch;
+        else runs.push({ ...style, text: c.ch });
+      }
+    });
+    if (runs.length) runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/\s+$/, '');
+    return { id, page, box, runs };
+  });
+});
+
+/**
+ * Rewrites text blocks of the template. Each block is set again in its own font, size, letter-spacing and
+ * alignment; the lines re-wrap inside the block's margins.
+ *
+ * @param edits  { [blockId]: runs } with runs = [{ text, bold, italic, color }] (ids from listTemplateBlocks)
+ */
+export async function editTemplateText(pdfBytes, analysis, edits, options = {}) {
+  const warnings = new Set();
+  const unsupported = new Set();
+  const pdfDoc = await PDFDocument.load(pdfBytes);
+  const pages = pdfDoc.getPages();
+
+  const jobs = pages.map((page, p) => {
+    const info = pageBlocks(analysis, p);
+    const pageEdits = info.blocks
+      .filter((b) => b.editable && edits[b.id])
+      .map((b) => ({ s: b.s, e: b.e, group: b.group, runs: edits[b.id] }));
+    return { page, ...info, pageEdits };
+  }).filter((job) => job.pageEdits.length);
+
+  const wanted = [];
+  jobs.forEach((job) => job.pageEdits.forEach((ed) => {
+    const families = new Set(ed.group.lines.flatMap((l) => l.items.map((i) => (!i.family || i.family === 'other' ? 'helvetica' : i.family))));
+    families.forEach((family) => {
+      wanted.push({ family, bold: false, italic: false });
+      ed.runs.forEach((run) => wanted.push({ family, bold: Boolean(run.bold), italic: Boolean(run.italic) }));
+    });
+  }));
+  const font = await createFontBook(pdfDoc, wanted, { loader: options.fontLoader, warnings });
+  const safe = makeSafeText(warnings, unsupported);
+  const black = { r: 0, g: 0, b: 0 };
+
+  jobs.forEach(({ page, lines, chars, pageEdits, size, bannerY }) => {
+    applyEdits(page, lines, chars, pageEdits, {
+      font, safe, warnings,
+      value: { family: 'auto', bold: false, italic: false, color: null },
+      defaultColor: black,
+      banner: analysis.bannerRgb || BANNER_RGB,
+      bannerY,
+      pageW: size.width,
+      page: { width: size.width, centreX: size.x + size.width / 2 },
+    });
+  });
+
+  if (unsupported.size) warnings.add(`Some characters (${[...unsupported].slice(0, 6).join(' ')}) cannot be printed in the template font and were replaced by "?".`);
   return { bytes: await pdfDoc.save(), warnings: [...warnings] };
 }
