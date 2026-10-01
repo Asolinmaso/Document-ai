@@ -873,7 +873,8 @@ const fillRuns = (runs, replacements) => {
     if (lastRun && lastRun.src === src) lastRun.text += text[i];
     else out.push({ ...src, text: text[i], src });
   }
-  return out.map(({ src, ...run }) => run);
+  out.forEach((run) => { delete run.src; });
+  return out;
 };
 
 /**

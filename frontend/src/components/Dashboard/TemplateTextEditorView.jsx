@@ -34,7 +34,7 @@ const htmlToRuns = (root) => {
   const runs = [];
   const walk = (node, style) => {
     if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.nodeValue.replace(/ /g, ' ').replace(/[\r\n\t]+/g, ' ');
+      const text = node.nodeValue.replace(/\u00a0/g, ' ').replace(/[\r\n\t]+/g, ' ');
       if (text) runs.push({ ...style, text });
       return;
     }
@@ -170,7 +170,7 @@ const TemplateTextEditorView = ({ doc, onBack, onSave, showToast }) => {
   const [pdfDoc, setPdfDoc] = useState(null);
   const [warnings, setWarnings] = useState([]);
   const [saving, setSaving] = useState(false);
-  const initialEdits = useRef(JSON.stringify(doc?.templateEdits || {}));
+  const [initialEdits] = useState(() => JSON.stringify(doc?.templateEdits || {}));
 
   // 1. the untouched template (documents saved by older versions only have the filled file)
   useEffect(() => {
@@ -246,7 +246,7 @@ const TemplateTextEditorView = ({ doc, onBack, onSave, showToast }) => {
   }, []);
 
   const changedCount = Object.keys(edits).length;
-  const dirty = JSON.stringify(edits) !== initialEdits.current;
+  const dirty = JSON.stringify(edits) !== initialEdits;
 
   const handleSave = async () => {
     if (!dirty || saving) return;
