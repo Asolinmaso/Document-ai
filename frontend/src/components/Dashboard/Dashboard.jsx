@@ -45,6 +45,11 @@ import {
   deleteDocument,
 } from '../../services/dataService';
 
+// Every document served by the current backend carries `updatedAt`. If it is missing, the deployed API is
+// an older build than this app: drafts, history details and "last updated" depend on the newer one.
+const isOutdatedBackend = (doc) => Boolean(doc) && doc.updatedAt === undefined;
+const OUTDATED_BACKEND_MESSAGE = 'The server is running an older version than this app, so drafts and saved quotation details may not be stored correctly. Redeploy the backend to fix this.';
+
 // ── Shared sub-components ─────────────────────────────────────────────────────
 
 const SolidDocIcon = ({ color, size = 'md' }) => {
@@ -418,6 +423,7 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
         ]);
         if (!cancelled) {
           setAllDocs(docs || []);
+          if ((docs || []).some(isOutdatedBackend)) showToast?.(OUTDATED_BACKEND_MESSAGE, 'warning', 12000);
           setProfileData(profile || {});
           setCompanyLogos(logos || []);
         }
@@ -536,11 +542,19 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
   // A draft / sent quotation made from a template is its own record, so the template itself stays untouched.
   // The editor switches to the new record (it is re-mounted because it is keyed by document id).
   const handleCreateQuotation = useCallback(async (data) => {
-    const saved = await createDocument(data);
+    let saved = await createDocument(data);
+    // A backend build from before drafts existed stores every new document as "active" and ignores the
+    // status it was sent. Its update route does accept a status, so the draft is put right with a
+    // second request rather than silently ending up in the Document list.
+    if (data.status && saved.status !== data.status) {
+      saved = { ...saved, ...(await updateDocument(saved.id, { status: data.status, quotationData: data.quotationData })) };
+    }
+    if (isOutdatedBackend(saved)) saved = { ...saved, quotationData: saved.quotationData || data.quotationData };
     setAllDocs((prev) => [saved, ...prev]);
     setSelectedDoc(saved);
+    if (isOutdatedBackend(saved)) showToast?.(OUTDATED_BACKEND_MESSAGE, 'warning', 12000);
     return saved;
-  }, []);
+  }, [showToast]);
 
   // Template Editor "Save Changes": update the template file + its widgets, then return to the quotation.
   const handleSaveTemplateEdit = useCallback(async (id, data) => {
