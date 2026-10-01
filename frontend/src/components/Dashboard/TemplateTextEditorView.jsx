@@ -259,7 +259,7 @@ const TemplateTextEditorView = ({ doc, onBack, onSave, showToast }) => {
       });
     } catch (err) {
       console.error('Failed to save the template changes:', err);
-      showToast?.('Failed to save. Please try again.', 'error');
+      showToast?.(`Could not save: ${err.message || 'please try again.'}`, 'error');
     } finally {
       setSaving(false);
     }

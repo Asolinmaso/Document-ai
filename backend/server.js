@@ -440,15 +440,17 @@ app.get('/api/documents', authenticateToken, async (req, res) => {
 
 app.post('/api/documents', authenticateToken, async (req, res) => {
   try {
-    const { name, type, edited, file, status, quotationData, templateElements, templateFile, templateEdits } = req.body;
+    const { name, type, edited, file, status, quotationData, templateElements, templateFile, templateEdits, templateFrom } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Document name is required.' });
 
     const id = Date.now();
 
     const result = await pool.query(
       `INSERT INTO documents (id, name, type, edited, file, status, quotation_data, template_elements, template_file, template_edits, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()) RETURNING *, ${DOC_RETURNING}`,
-      [id, name.trim(), type || '', edited || '', file || '', status || 'active', JSON.stringify(quotationData || {}), templateElements ? JSON.stringify(templateElements) : null, templateFile || null, templateEdits ? JSON.stringify(templateEdits) : null]
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, (SELECT template_file FROM documents WHERE id = $11)), $10, NOW(), NOW()) RETURNING *, ${DOC_RETURNING}`,
+      [id, name.trim(), type || '', edited || '', file || '', status || 'active', JSON.stringify(quotationData || {}), templateElements ? JSON.stringify(templateElements) : null, templateFile || null, templateEdits ? JSON.stringify(templateEdits) : null,
+        // `templateFrom`: copy the pristine template of an existing document instead of uploading it again
+        /^\d+$/.test(String(templateFrom ?? '')) ? String(templateFrom) : null]
     );
 
     res.status(201).json(result.rows[0]);

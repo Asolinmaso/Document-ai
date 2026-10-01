@@ -4,15 +4,20 @@ import React, { memo } from 'react';
 const PdfPage = memo(({ pdfDoc, pageNum, width, height }) => {
   const canvasRef = React.useRef(null);
 
+  // pdf.js refuses to draw on a canvas that another render is still using, so renders are queued per
+  // canvas: a new one first cancels the previous one and waits for it to stop.
+  const activeRef = React.useRef(Promise.resolve());
+
   React.useEffect(() => {
-    if (!pdfDoc) return;
+    if (!pdfDoc) return undefined;
+    let cancelled = false;
     let renderTask = null;
 
     const renderPage = async () => {
       try {
         const page = await pdfDoc.getPage(pageNum);
         const canvas = canvasRef.current;
-        if (!canvas) return;
+        if (cancelled || !canvas) return;
 
         const context = canvas.getContext('2d');
         const dpr = window.devicePixelRatio || 1;
@@ -25,15 +30,9 @@ const PdfPage = memo(({ pdfDoc, pageNum, width, height }) => {
         const viewport = page.getViewport({ scale: 1.0 });
         const scaleX = (width * dpr) / viewport.width;
         const scaleY = (height * dpr) / viewport.height;
-        const transform = [scaleX, 0, 0, scaleY, 0, 0];
 
         context.clearRect(0, 0, canvas.width, canvas.height);
-
-        renderTask = page.render({
-          canvasContext: context,
-          viewport: viewport,
-          transform: transform
-        });
+        renderTask = page.render({ canvasContext: context, viewport, transform: [scaleX, 0, 0, scaleY, 0, 0] });
         await renderTask.promise;
       } catch (err) {
         if (err.name !== 'RenderingCancelledException' && err.message !== 'Rendering cancelled, closed or replaced') {
@@ -42,12 +41,12 @@ const PdfPage = memo(({ pdfDoc, pageNum, width, height }) => {
       }
     };
 
-    renderPage();
+    const previous = activeRef.current;
+    activeRef.current = previous.then(() => (cancelled ? undefined : renderPage()));
 
     return () => {
-      if (renderTask) {
-        renderTask.cancel();
-      }
+      cancelled = true;
+      if (renderTask) renderTask.cancel();
     };
   }, [pdfDoc, pageNum, width, height]);
 

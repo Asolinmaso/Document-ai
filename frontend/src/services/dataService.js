@@ -20,9 +20,12 @@ export const updateLogos = (logos) => api.post('/logos', logos);
 
 export const fetchDocuments = () => api.get('/documents');
 
-export const createDocument = (doc) => api.post('/documents', doc);
+// Document writes carry PDF files (1 MB and more), so they get more time than the default 30 s.
+const UPLOAD = { timeout: 180000 };
 
-export const updateDocument = (id, data) => api.put(`/documents/${id}`, data);
+export const createDocument = (doc) => api.post('/documents', doc, UPLOAD);
+
+export const updateDocument = (id, data) => api.put(`/documents/${id}`, data, UPLOAD);
 
 export const deleteDocument = (id) => api.delete(`/documents/${id}`);
 

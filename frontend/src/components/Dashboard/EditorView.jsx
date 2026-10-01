@@ -566,7 +566,8 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
         name,
         type: doc.type || 'Quotation',
         file: dataUrl || doc.file || '',
-        ...(templateData ? { templateFile: templateData } : {}),
+        // the server copies the stored template from this document, so it is not uploaded a second time
+        ...(doc.templateFile ? { templateFrom: doc.id } : templateData ? { templateFile: templateData } : {}),
         ...(doc.templateEdits ? { templateEdits: doc.templateEdits } : {}),
         ...(doc.templateElements ? { templateElements: doc.templateElements } : {}),
       });
@@ -596,7 +597,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
       showToast?.(successMessage, 'success');
     } catch (err) {
       console.error('Failed to save quotation:', err);
-      showToast?.('Failed to save. Please try again.', 'error');
+      showToast?.(`Could not save: ${err.message || 'please try again.'}`, 'error');
     } finally {
       setIsSaving(false);
     }
