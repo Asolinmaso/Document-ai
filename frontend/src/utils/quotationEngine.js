@@ -1,15 +1,18 @@
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFBool, rgb } from 'pdf-lib';
+import { createFontBook, describeFontName, makeSafeText } from './pdfFonts';
+import { applyEdits, buildStream, findEdits, fontSizeOf, segmentLines } from './textReflow';
+import { CONTINUATION_KEY } from './templateRestore';
 
 /**
  * Quotation fill engine.
  *
- * Works on three kinds of templates:
- *   1. blank templates with placeholders (XXXX, xx%, [Company Name] ...)
- *   2. previously filled quotations whose values must be overwritten
- *   3. quotations whose Date / To lines are blank (label only, no placeholder)
+ * Always run on the pristine template (see templateRestore.js), never on an already filled PDF.
+ * Works with blank templates that carry placeholders (XXXX, xx%, [Company Name] ...), with templates
+ * that carry a sample client's values, and with Date / To lines that are blank (label only).
  *
- * Everything is anchored on what is really in the PDF (labels, sentences, and the
- * table grid measured from a raster of the page) rather than on fixed coordinates.
+ * Everything is anchored on what is really in the PDF (labels, sentences, and the table grid measured
+ * from a raster of the page) rather than on fixed coordinates. Text is replaced by re-typesetting its
+ * line in the template's own font (textReflow.js), so values never shrink, overlap or leave holes.
  * All coordinates below are PDF points with the origin at the bottom-left.
  */
 
@@ -19,22 +22,21 @@ const FOOTER_RATIO = 0.095;
 const FOOTER_CLEAR_RATIO = 0.075; // continuation pages are wiped down to here (the footer band sits just below)
 const BANNER_RGB = { r: 0x13 / 255, g: 0xb6 / 255, b: 0xd7 / 255 };
 const RIGHT_MARGIN = 26;
+const HEADER_RIGHT_MARGIN = 10; // the banner runs to the page edge
 const MAX_ROWS = 200;
+const RASTER_SCALE = 2;
+export const DEFAULT_TEXT_COLOR = '#111827';
 
 const TABLE_KEYS = ['s.no', 'role', 'positions', 'qualifications', 'package'];
 const TABLE_HEADERS = ['S.No', 'Role', 'No of Positions', 'Qualifications', 'Package'];
-
-const CHAR_FALLBACK = {
-  '₹': 'Rs. ', '–': '-', '—': '-', '−': '-', '‑': '-', '…': '...',
-  '\u00a0': ' ', '\u2009': ' ', '\u200b': '', '×': 'x', '→': '->', '⟶': '->',
-};
+// Pages whose body text can receive a value: only these are rasterised to read the text colours.
+const BODY_TRIGGER = /x{2,}|\[[^\]]*\]|\{\{|service\s+fee|guarantee|services\s+to|sharp\s+associates|continued\s+success/i;
+const CONTINUATION_HEADING = /position\s+requirements\s*\(contd/i;
 
 const hexToRgb = (hex) => {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
   return m ? { r: parseInt(m[1], 16) / 255, g: parseInt(m[2], 16) / 255, b: parseInt(m[3], 16) / 255 } : { r: 0.07, g: 0.09, b: 0.15 };
 };
-
-const fontSizeOf = (item) => Math.abs(item.transform[3]) || item.height || 12;
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Analysis (runs once per template)
@@ -70,6 +72,7 @@ export const groupIntoLines = (items, pageNum) => {
   return lines.sort((a, b) => b.y - a.y);
 };
 
+
 /**
  * Finds the position-requirements table grid on a rasterised page.
  * Returns { cols[], top, headerBottom, bottom, seps[], lw } in PDF points or null.
@@ -104,9 +107,20 @@ const detectGrid = (img, scale, pageH, origin, headerY, floorY) => {
   });
   // keep only the lines that share the table's x-extent (the widest one)
   const widest = groups.reduce((a, b) => (b.xR - b.xL > a.xR - a.xL ? b : a));
+  // Thickness from ink coverage (anti-aliased rows count for what they cover), sampled away from the column rules
+  const lumAt = (x, y) => { const i = (y * width + x) * 4; return data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114; };
+  const thicknessOf = (g) => {
+    const xs = [0.13, 0.31, 0.47, 0.69, 0.87].map((r) => Math.round(g.xL + (g.xR - g.xL) * r));
+    const perColumn = xs.map((x) => {
+      let ink = 0;
+      for (let y = Math.max(0, g.y0 - 1); y <= Math.min(height - 1, g.y1 + 1); y++) ink += 1 - lumAt(x, y) / 255;
+      return ink;
+    }).sort((a, b) => a - b);
+    return perColumn[Math.floor(perColumn.length / 2)] / scale;
+  };
   const hLines = groups
     .filter((g) => Math.abs(g.xL - widest.xL) < 6 && Math.abs(g.xR - widest.xR) < 6)
-    .map((g) => ({ y: toPt((g.y0 + g.y1 + 1) / 2), th: (g.y1 - g.y0 + 1) / scale }))
+    .map((g) => ({ y: toPt((g.y0 + g.y1 + 1) / 2), th: thicknessOf(g) }))
     .sort((a, b) => b.y - a.y);
 
   const above = hLines.filter((l) => l.y > headerY);
@@ -141,7 +155,7 @@ const detectGrid = (img, scale, pageH, origin, headerY, floorY) => {
     headerBottom: headerBottom.y,
     bottom: bottom.y,
     seps: seps.map((s) => s.y),
-    lw: Math.max(0.6, Math.min(1.6, headerBottom.th)),
+    lw: Math.max(0.5, Math.min(1.6, headerBottom.th)),
   };
 };
 
@@ -163,6 +177,61 @@ const guessGrid = (headerLine, noteLine, pageW) => {
   return { cols, top: headerLine.y + 24, headerBottom, bottom, seps: [], lw: 0.8, guessed: true };
 };
 
+
+/** Colour of a text item: the darkest pixel inside its x-height band (the background is always lighter). */
+const sampleInk = (img, scale, pageH, origin, item) => {
+  const size = fontSizeOf(item);
+  const x0 = Math.max(0, Math.floor((item.transform[4] - origin.x) * scale));
+  const x1 = Math.min(img.width - 1, Math.ceil((item.transform[4] + item.width - origin.x) * scale));
+  const y0 = Math.max(0, Math.floor((origin.y + pageH - (item.transform[5] + size * 0.72)) * scale));
+  const y1 = Math.min(img.height - 1, Math.ceil((origin.y + pageH - (item.transform[5] + size * 0.02)) * scale));
+  let best = null;
+  let bestLum = Infinity;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const i = (y * img.width + x) * 4;
+      if (img.data[i + 3] < 200) continue;
+      const lum = img.data[i] * 0.299 + img.data[i + 1] * 0.587 + img.data[i + 2] * 0.114;
+      if (lum < bestLum) { bestLum = lum; best = i; }
+    }
+  }
+  return best === null ? null : { r: img.data[best] / 255, g: img.data[best + 1] / 255, b: img.data[best + 2] / 255 };
+};
+
+/**
+ * What is behind a strip of the page (e.g. white, then the pale watermark, then white again), as runs
+ * [{ x0, x1, color }] in points. Per pixel column the lightest pixel of the strip is taken, which is the
+ * background wherever text or a rule crosses it. Lets erased areas be repainted without cutting the watermark.
+ */
+const backgroundRuns = (img, scale, pageH, origin, x0Pt, x1Pt, yTopPt, yBottomPt) => {
+  const x0 = Math.max(0, Math.floor((x0Pt - origin.x) * scale));
+  const x1 = Math.min(img.width - 1, Math.ceil((x1Pt - origin.x) * scale));
+  const y0 = Math.max(0, Math.floor((origin.y + pageH - yTopPt) * scale));
+  const y1 = Math.min(img.height - 1, Math.ceil((origin.y + pageH - yBottomPt) * scale));
+  const runs = [];
+  for (let x = x0; x <= x1; x++) {
+    let best = -1;
+    let at = -1;
+    for (let y = y0; y <= y1; y++) {
+      const i = (y * img.width + x) * 4;
+      const lum = img.data[i] * 0.299 + img.data[i + 1] * 0.587 + img.data[i + 2] * 0.114;
+      if (lum > best) { best = lum; at = i; }
+    }
+    // a column that is dark all the way down is a rule, not background
+    const c = at < 0 || best < 150 ? [255, 255, 255] : [img.data[at], img.data[at + 1], img.data[at + 2]];
+    const key = `${c[0] >> 3},${c[1] >> 3},${c[2] >> 3}`;
+    const last = runs[runs.length - 1];
+    const xPt = origin.x + x / scale;
+    if (last && last.key === key) last.x1 = xPt + 1 / scale;
+    else runs.push({ key, x0: xPt, x1: xPt + 1 / scale, color: { r: c[0] / 255, g: c[1] / 255, b: c[2] / 255 } });
+  }
+  if (!runs.length || runs.length > 48) return null; // too busy to follow: the caller paints plain white
+  if (runs.length === 1 && runs[0].key === '31,31,31') return null;
+  runs[0].x0 = x0Pt;
+  runs[runs.length - 1].x1 = x1Pt;
+  return runs.map(({ x0: a, x1: b, color }) => ({ x0: a, x1: b, color }));
+};
+
 export async function analyzeTemplate(pdfjsLib, pdfBytes, { rasterize = defaultRasterize } = {}) {
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) }).promise;
   const pdfLines = [];
@@ -177,9 +246,25 @@ export async function analyzeTemplate(pdfjsLib, pdfBytes, { rasterize = defaultR
     const origin = { x: page.view[0], y: page.view[1] };
     pageSizes.push({ width: vp.width, height: vp.height, ...origin });
     const tc = await page.getTextContent();
-    const items = tc.items.filter((i) => i.str && i.str.trim()).map((i) => ({ ...i, pageNum: p }));
+
+    // real font names ("Montserrat-Bold") are only known once the page's operator list has been built
+    try { await page.getOperatorList(); } catch { /* fonts then count as unknown */ }
+    const fontInfo = new Map();
+    const infoOf = (fontName) => {
+      if (!fontInfo.has(fontName)) {
+        let name = '';
+        try { name = page.commonObjs.get(fontName)?.name || ''; } catch { /* not resolved */ }
+        fontInfo.set(fontName, describeFontName(name));
+      }
+      return fontInfo.get(fontName);
+    };
+
+    const items = tc.items
+      .filter((i) => i.str && i.str.trim())
+      .map((i) => ({ str: i.str, transform: i.transform, width: i.width, height: i.height, fontName: i.fontName, pageNum: p, ...infoOf(i.fontName) }));
     const lines = groupIntoLines(items, p);
     pdfLines.push(...lines);
+    const pageText = lines.map((l) => l.str).join('\n');
 
     lines.filter((l) => l.y > origin.y + vp.height * BANNER_RATIO).forEach((l) => {
       const d = /date\s*:\s*(.+)$/i.exec(l.str);
@@ -188,14 +273,17 @@ export async function analyzeTemplate(pdfjsLib, pdfBytes, { rasterize = defaultR
       if (t && !extracted.company && !/x{3,}/i.test(t[1])) extracted.company = t[1].trim();
     });
 
+    let raster = null;
+    const getRaster = async () => (raster ||= await rasterize(page, RASTER_SCALE));
+
     if (!bannerRgb) {
       const hdr = lines.find((l) => l.y > origin.y + vp.height * BANNER_RATIO && /^\s*(date|to)\s*:/i.test(l.items[0].str));
       if (hdr) {
         try {
           // sample a blank pixel of the banner just right of the header text so erased patches match exactly
-          const img = await rasterize(page, 1);
-          const px = Math.round(hdr.maxX + 12 - origin.x);
-          const py = Math.round(origin.y + vp.height - (hdr.y + hdr.height * 0.35));
+          const img = await getRaster();
+          const px = Math.round((hdr.maxX + 12 - origin.x) * RASTER_SCALE);
+          const py = Math.round((origin.y + vp.height - (hdr.y + hdr.height * 0.35)) * RASTER_SCALE);
           if (px > 0 && px < img.width - 2 && py > 0 && py < img.height) {
             const i = (py * img.width + px) * 4;
             if (img.data[i + 3] > 200) bannerRgb = { r: img.data[i] / 255, g: img.data[i + 1] / 255, b: img.data[i + 2] / 255 };
@@ -204,20 +292,48 @@ export async function analyzeTemplate(pdfjsLib, pdfBytes, { rasterize = defaultR
       }
     }
 
+    if (BODY_TRIGGER.test(pageText)) {
+      try {
+        const img = await getRaster();
+        items.forEach((item) => {
+          const size = fontSizeOf(item);
+          item.color = sampleInk(img, RASTER_SCALE, vp.height, origin, item) || undefined;
+          // same strip textReflow erases when it re-typesets the line
+          item.bg = backgroundRuns(img, RASTER_SCALE, vp.height, origin, item.transform[4] - 0.75, item.transform[4] + item.width + 0.75, item.transform[5] + size * 0.94, item.transform[5] - size * 0.28) || undefined;
+        });
+      } catch (err) {
+        console.warn('Text colours could not be read, values will use the default colour:', err);
+      }
+    }
+
+    if (CONTINUATION_HEADING.test(pageText)) continue; // a page an earlier fill added, never a template table
     const headerLine = lines.find((l) => TABLE_KEYS.filter((k) => l.str.toLowerCase().includes(k)).length >= 3);
     if (!headerLine) continue;
     const noteLine = lines.find((l) => l.y < headerLine.y && /^note\s*:/i.test(l.str.trim()));
     let grid = null;
     try {
-      const scale = 2;
-      const img = await rasterize(page, scale);
+      const img = await getRaster();
       const floor = noteLine ? noteLine.y + 2 : headerLine.y - 520;
-      grid = detectGrid(img, scale, vp.height, origin, headerLine.y, floor);
+      grid = detectGrid(img, RASTER_SCALE, vp.height, origin, headerLine.y, floor);
       if (grid && grid.cols.length !== TABLE_HEADERS.length + 1) grid = null; // unexpected column count -> don't trust it
+      if (grid) {
+        // background just above each of the template's row dividers, for wiping them (see applyTable)
+        const l = grid.cols[0];
+        const r = grid.cols[grid.cols.length - 1];
+        grid.sepFills = grid.seps.map((sy) => backgroundRuns(img, RASTER_SCALE, vp.height, origin, l - grid.lw, r + grid.lw, sy + grid.lw + 4.5, sy + grid.lw + 2.2));
+      }
     } catch (err) {
       console.warn('Table grid detection failed, using text-based estimate:', err);
     }
-    tables.push({ page: p, headerY: headerLine.y, noteLine: noteLine || null, ...(grid || guessGrid(headerLine, noteLine, vp.width)) });
+    const headItem = headerLine.items[0];
+    tables.push({
+      page: p,
+      headerY: headerLine.y,
+      noteLine: noteLine || null,
+      family: headItem.family,
+      headerSize: fontSizeOf(headItem),
+      ...(grid || guessGrid(headerLine, noteLine, vp.width)),
+    });
   }
 
   return { pdfLines, tables, pageSizes, extracted, bannerRgb };
@@ -226,21 +342,6 @@ export async function analyzeTemplate(pdfjsLib, pdfBytes, { rasterize = defaultR
 /* ────────────────────────────────────────────────────────────────────────────
  * Filling
  * ────────────────────────────────────────────────────────────────────────── */
-
-const makeTextTools = (font, warnings, unsupported) => {
-  let supported = null;
-  try { supported = new Set(font.getCharacterSet()); } catch { /* not a standard font */ }
-  return (text) => {
-    let out = '';
-    for (const ch of String(text ?? '').replace(/[\r\n\t]+/g, ' ')) {
-      const cp = ch.codePointAt(0);
-      if (!supported || supported.has(cp)) out += ch;
-      else if (CHAR_FALLBACK[ch] !== undefined) { out += CHAR_FALLBACK[ch]; if (ch === '₹') warnings.add('₹ is printed as "Rs." (the PDF font has no rupee sign).'); }
-      else { out += '?'; unsupported.add(ch); }
-    }
-    return out;
-  };
-};
 
 const wrapText = (text, font, size, maxW) => {
   const words = String(text ?? '').split(/\s+/).filter(Boolean);
@@ -265,7 +366,7 @@ const wrapText = (text, font, size, maxW) => {
   return lines.length ? lines : [''];
 };
 
-/** Cuts `text` with "..." so it fits `maxW` at the given size. Used instead of shrinking the font. */
+/** Cuts `text` with "..." so it fits `maxW` at the given size. */
 const ellipsize = (text, font, size, maxW) => {
   const t = String(text ?? '');
   if (font.widthOfTextAtSize(t, size) <= maxW) return t;
@@ -275,119 +376,19 @@ const ellipsize = (text, font, size, maxW) => {
   return t.slice(0, n).trimEnd() + dots;
 };
 
-/**
- * Re-typesets the paragraph that contains a replaced span. Used when a long value cannot be patched in place
- * without running into the text that follows it. Bold runs are kept, lines are wrapped and justified to the
- * paragraph's own margins, and the line count is capped so it never runs into the next block. The font size is
- * never reduced: a value that would need more lines than the paragraph can spare is cut with "..." instead.
- */
-const planReflow = ({ lines, chars, spanItem, s, e, newText, fonts, textRgb }) => {
-  const idx = lines.findIndex((l) => l.items.includes(spanItem));
-  const near = (a, b) => Math.abs(a.y - b.y) < 26 && Math.abs(a.minX - b.minX) < 6;
-  let from = idx;
-  let to = idx;
-  while (from > 0 && near(lines[from - 1], lines[from])) from--;
-  while (to < lines.length - 1 && near(lines[to], lines[to + 1])) to++;
-  const para = lines.slice(from, to + 1);
-  const items = new Set(para.flatMap((l) => l.items));
-
-  // the font used for most characters is the regular one, the other is treated as bold
-  const usage = new Map();
-  items.forEach((i) => usage.set(i.fontName, (usage.get(i.fontName) || 0) + i.str.length));
-  const regularFont = [...usage.entries()].sort((a, b) => b[1] - a[1])[0][0];
-
-  const tokens = [];
-  let cur = null;
-  const flush = () => { if (cur) tokens.push(cur); cur = null; };
-  const first = chars.findIndex((c) => c.item && items.has(c.item));
-  let last = first;
-  chars.forEach((c, i) => { if (c.item && items.has(c.item)) last = i; });
-  let inserted = false;
-  for (let i = first; i <= last; i++) {
-    const c = chars[i];
-    if (i >= s && i < e) {
-      if (!inserted) {
-        flush();
-        newText.split(/\s+/).filter(Boolean).forEach((w) => tokens.push({ text: w, bold: true, custom: true }));
-        inserted = true;
-      }
-      continue;
-    }
-    if (!c.item || /\s/.test(c.ch)) { flush(); continue; }
-    if (!items.has(c.item)) continue;
-    if (!cur) cur = { text: '', bold: c.item.fontName !== regularFont };
-    cur.text += c.ch;
-  }
-  flush();
-  // a lone period / comma belongs to the word before it
-  const words = [];
-  tokens.forEach((t) => {
-    if (words.length && /^[.,;:!?]+$/.test(t.text)) words[words.length - 1] = { ...words[words.length - 1], text: words[words.length - 1].text + t.text };
-    else words.push(t);
-  });
-
-  const size0 = fontSizeOf(para[0].items[0]);
-  const left = Math.min(...para.map((l) => l.minX));
-  const width = Math.max(...para.map((l) => l.maxX)) - left;
-  const lead = para.length > 1 ? (para[0].y - para[para.length - 1].y) / (para.length - 1) : size0 * 1.3;
-  const below = lines[to + 1];
-  const spare = below ? Math.max(0, Math.floor((para[para.length - 1].y - below.y - size0 * 1.5) / lead)) : 1;
-  const maxLines = para.length + spare;
-  const fontOf = (t) => (t.bold ? fonts.bold : fonts.regular);
-
-  const layout = (size) => {
-    const rows = [];
-    let row = [];
-    let w = 0;
-    const space = fonts.regular.widthOfTextAtSize(' ', size);
-    words.forEach((t) => {
-      const tw = fontOf(t).widthOfTextAtSize(t.text, size);
-      if (row.length && w + space + tw > width) { rows.push(row); row = []; w = 0; }
-      w += (row.length ? space : 0) + tw;
-      row.push({ ...t, w: tw });
-    });
-    if (row.length) rows.push(row);
-    return rows;
-  };
-  const size = size0;
-  let rows = layout(size);
-  // too long for the room available: trim the inserted value (last word first) instead of shrinking the text
-  while (rows.length > maxLines) {
-    const customAt = words.reduce((acc, w, i) => (w.custom ? [...acc, i] : acc), []);
-    if (!customAt.length) break;
-    const last = customAt[customAt.length - 1];
-    const bare = words[last].text.replace(/\.{3}$/, '');
-    if (customAt.length > 1) {
-      words.splice(last, 1);
-      const prev = customAt[customAt.length - 2];
-      words[prev] = { ...words[prev], text: `${words[prev].text.replace(/\.{3}$/, '')}...` };
-    } else if (bare.length > 4) {
-      words[last] = { ...words[last], text: `${bare.slice(0, Math.max(3, bare.length - 3))}...` };
-    } else break;
-    rows = layout(size);
-  }
-
-  const draw = (page) => {
-    const space = fonts.regular.widthOfTextAtSize(' ', size);
-    rows.forEach((row, k) => {
-      const y = para[0].y - k * lead;
-      const natural = row.reduce((sum, t) => sum + t.w, 0);
-      const justify = k < rows.length - 1 && row.length > 1;
-      const gap = justify ? Math.min((width - natural) / (row.length - 1), space * 3) : space;
-      let x = left;
-      row.forEach((t) => {
-        const c = t.custom ? textRgb : { r: 0, g: 0, b: 0 };
-        page.drawText(t.text, { x, y, size, font: fontOf(t), color: rgb(c.r, c.g, c.b) });
-        x += t.w + gap;
-      });
-    });
-  };
-  return { items, draw };
-};
-
 const escapeRe = (s) => s.trim().replace(/\s+/g, ' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+').replace(/['’]/g, "['’]");
 
-const buildReplacements = ({ date, companyName, replacementGuarantee, serviceFee }) => {
+/** "45000" -> "Rs. 45,000"; text that already names a currency or a percentage is kept as typed. */
+const formatAdvance = (advanceAmount) => {
+  const a = advanceAmount?.trim();
+  if (!a) return null;
+  const plain = a.replace(/,/g, '');
+  if (/^\d+(\.\d+)?$/.test(plain)) return `Rs. ${Number(plain).toLocaleString('en-IN')}`;
+  return /^(rs\b|₹|inr\b)/i.test(a) || /%$/.test(a) ? a : `Rs. ${a}`;
+};
+
+/** Patterns are matched against the page text (text items joined by blanks, lines by newlines). */
+const buildReplacements = ({ date, companyName, replacementGuarantee, serviceFee, advanceAmount }) => {
   const list = [];
   const token = (targets, text) => targets.forEach((t) => list.push({ re: new RegExp(escapeRe(t), 'gi'), group: 0, text }));
 
@@ -396,15 +397,15 @@ const buildReplacements = ({ date, companyName, replacementGuarantee, serviceFee
   }
   if (companyName) {
     // The sentence "... services to <client>. We appreciate ..." – works for placeholders and for old client names.
-    list.push({ re: /services\s+to\s+([\s\S]+?)\s*\.?\s*We\s+appreciate/gi, group: 1, text: companyName, reflow: true });
+    list.push({ re: /services\s+to\s+([\s\S]+?)\s*\.?\s*We\s+appreciate/gi, group: 1, text: companyName });
     // Closing paragraphs of the Manvian-branded template, e.g. "... add substantial value to
     // <client> and help secure ..." and "... contributing to <client>['s] continued success."
-    list.push({ re: /add\s+substantial\s+value\s+to\s+([\s\S]+?)\s+and\s+help\s+secure/gi, group: 1, text: companyName, reflow: true });
-    list.push({ re: /contributing\s+to\s+([\s\S]+?)\s+continued\s+success/gi, group: 1, text: companyName, reflow: true });
+    list.push({ re: /add\s+substantial\s+value\s+to\s+([\s\S]+?)\s+and\s+help\s+secure/gi, group: 1, text: companyName });
+    list.push({ re: /contributing\s+to\s+([\s\S]+?)\s+continued\s+success/gi, group: 1, text: companyName });
     token(['xxx_company', '[company]', '{{company}}', 'company xxx', 'XXXX[Company Name]', '[Company Name]', "XXXX[Company's Name]", "[Company's Name]"], companyName);
     // Literal placeholder client name baked into that same template's sample copy, wherever it
     // recurs (full "Sharp Associates Asset Developers" or the short "Sharp Associates" form).
-    list.push({ re: /Sharp\s+Associates(?:\s+Asset\s+Developers)?/gi, group: 0, text: companyName, reflow: true });
+    list.push({ re: /Sharp\s+Associates(?:\s+Asset\s+Developers)?/gi, group: 0, text: companyName });
   }
   if (replacementGuarantee) {
     let g = replacementGuarantee.trim();
@@ -412,259 +413,86 @@ const buildReplacements = ({ date, companyName, replacementGuarantee, serviceFee
     list.push({ re: /replacement\s+guarantee\s+is\s+([\s\S]+?)\s+from\s+the/gi, group: 1, text: g });
     token(['XXmonths', 'XX months', 'XXmonth', 'XX month', 'xxx_months', '[months]'], g);
   }
-  if (serviceFee) {
-    let f = serviceFee.trim();
-    if (/^\d+(\.\d+)?$/.test(f)) f += '%';
-    list.push({ re: /standard\s+service\s+fee\s+for\s+recruitment\s+is\s+([\s\S]+?)\s+of\s+the/gi, group: 1, text: f });
-    list.push({ re: new RegExp(escapeRe('Rs . XX %'), 'gi'), group: 0, text: `Rs . ${f}` });
+
+  let fee = serviceFee?.trim();
+  if (fee && /^\d+(\.\d+)?$/.test(fee)) fee += '%';
+  // "Advance / Booking Fee: Rs . XX%" – the advance amount when one is given, otherwise the fee percentage
+  const advance = formatAdvance(advanceAmount) || fee;
+  if (advance) list.push({ re: /Rs\s*\.\s*XX\s*%/gi, group: 0, text: advance });
+  if (fee) {
+    list.push({ re: /standard\s+service\s+fee\s+for\s+recruitment\s+is\s+([\s\S]+?)\s+of\s+the/gi, group: 1, text: fee });
     // Fee Structure lines that restate the service fee percentage
-    list.push({ re: /(\d+(?:\.\d+)?\s*%)\s+of\s+candidate['’]s\s+annual\s+CTC/gi, group: 1, text: f });
-    list.push({ re: /within\s+the\s+(\d+(?:\.\d+)?\s*%)\s+service\s+fee/gi, group: 1, text: f });
-    token(['xxx_%', 'xxx%', 'xx %', 'xx%', '[fee]'], f);
+    list.push({ re: /(\d+(?:\.\d+)?\s*%)\s+of\s+candidate['’]s\s+annual\s+CTC/gi, group: 1, text: fee });
+    list.push({ re: /within\s+the\s+(\d+(?:\.\d+)?\s*%)\s+service\s+fee/gi, group: 1, text: fee });
+    token(['xxx_%', 'xxx%', 'xx %', 'xx%', '[fee]'], fee);
   }
   return list;
 };
 
-/** Replace text spans found in the page's text stream, re-typesetting them inside the space each slot really has. */
-const applyReplacements = (page, pageLines, replacements, ctx) => {
-  if (!replacements.length || !pageLines.length) return;
-  const { fonts, safe, pageW, bannerY, textRgb } = ctx;
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-  const lines = [...pageLines].sort((a, b) => b.y - a.y);
-  const chars = [];
-  lines.forEach((line) => {
-    line.items.forEach((item, idx) => {
-      if (idx > 0) chars.push({ ch: ' ', item: null });
-      for (const ch of item.str) chars.push({ ch, item });
+/** The date as typed, followed by shorter spellings of the same day to fall back on when it is too wide. */
+const dateCandidates = (value) => {
+  if (!value) return [];
+  const out = [value];
+  const d = new Date(value.replace(/,/g, ', '));
+  if (!Number.isNaN(d.getTime()) && /\d{4}/.test(value)) {
+    const month = MONTHS[d.getMonth()];
+    [`${d.getDate()} ${month}, ${d.getFullYear()}`, `${d.getDate()} ${month.slice(0, 3)}, ${d.getFullYear()}`].forEach((alt) => {
+      if (!out.includes(alt)) out.push(alt);
     });
-    chars.push({ ch: '\n', item: null });
-  });
-  const stream = chars.map((c) => c.ch).join('');
-  const touched = new Map(); // item -> { scale, inserts }
-  const late = []; // draw calls that must run after the erase pass
-  const moved = new Set(); // trailing items that are re-typeset after a longer value
-  const shifts = [];
-
-  // free width from an item's start to the next surviving item on its line (or the right margin)
-  const freeWidth = (item, line) => {
-    const nxt = line.items.find((i) => i.transform[4] > item.transform[4] + 0.5 && !touched.has(i) && !moved.has(i) && !chars.some((c) => c.item === i && c.gone));
-    return (nxt ? nxt.transform[4] : pageW - RIGHT_MARGIN) - item.transform[4] - 3;
-  };
-  const lineOf = (item) => lines.find((l) => l.items.includes(item));
-
-  replacements.forEach(({ re, group, text, reflow }) => {
-    const rx = new RegExp(re.source, re.flags.includes('d') ? re.flags : `${re.flags}d`);
-    let m;
-    while ((m = rx.exec(stream)) !== null) {
-      if (m[0].length === 0) { rx.lastIndex++; continue; }
-      let s = m.index;
-      let e = m.index + m[0].length;
-      if (group && m.indices?.[group]) [s, e] = m.indices[group];
-      else if (group && m[group]) { s = m.index + m[0].indexOf(m[group]); e = s + m[group].length; }
-      if (chars.slice(s, e).some((c) => c.gone)) continue;
-
-      const span = [];
-      for (let i = s; i < e; i++) {
-        if (chars[i].item && !span.includes(chars[i].item)) span.push(chars[i].item);
-      }
-      if (!span.length) continue;
-      for (let i = s; i < e; i++) if (chars[i].item || chars[i].ch === ' ') chars[i].gone = true;
-      // remember the new text for each item and where in it the insert goes
-      span.forEach((item) => { if (!touched.has(item)) touched.set(item, { scale: 1, inserts: [] }); });
-
-      // a lone "." / "," right after the span is a separate text item – pull it in so it hugs the new text
-      let trailing = '';
-      let nx = e;
-      while (nx < chars.length && chars[nx].ch === ' ' && !chars[nx].item) nx++;
-      if (nx < chars.length && chars[nx].item && /^[.,;]$/.test(chars[nx].item.str.trim())) {
-        const punct = chars[nx].item;
-        trailing = punct.str.trim();
-        chars.forEach((c) => { if (c.item === punct) c.gone = true; });
-        touched.set(punct, { scale: 1, inserts: [] });
-      }
-
-      const words = safe(text).split(/\s+/).filter(Boolean);
-      if (trailing && words.length) words[words.length - 1] += trailing;
-      // items of the span that share a line form one slot (e.g. "xx" and "%" are two text items of one value)
-      const groups = [];
-      span.forEach((item) => {
-        const line = lineOf(item);
-        const g = groups[groups.length - 1];
-        if (g && g.line === line) g.items.push(item); else groups.push({ line, items: [item] });
-      });
-      const slots = groups.map(({ line, items }) => {
-        const item = items[0];
-        const kept = chars.filter((c) => c.item === item && !c.gone).map((c) => c.ch).join('');
-        const size = fontSizeOf(item);
-        const keptW = kept ? fonts.main.widthOfTextAtSize(kept, size) : 0;
-        return { item, items, line, size, keptW, cap: freeWidth(item, line) - keptW };
-      });
-
-      const alloc = (scale) => {
-        const buckets = slots.map(() => []);
-        let k = 0;
-        for (let w = 0; w < words.length; w++) {
-          let placed = false;
-          for (; k < slots.length; k++) {
-            const cur = buckets[k];
-            const trial = cur.length ? `${cur.join(' ')} ${words[w]}` : words[w];
-            const fits = fonts.main.widthOfTextAtSize(trial, slots[k].size * scale) <= slots[k].cap;
-            if (fits || k === slots.length - 1) { cur.push(words[w]); placed = true; break; }
-          }
-          if (!placed) buckets[slots.length - 1].push(words[w]);
-        }
-        const ok = buckets.every((b, i) => !b.length || fonts.main.widthOfTextAtSize(b.join(' '), slots[i].size * scale) <= slots[i].cap);
-        return { buckets, ok };
-      };
-      let chosen = null;
-      let scale = 1;
-      const tryScales = (list) => {
-        for (const sc of list) {
-          const trial = alloc(sc);
-          if (trial.ok) { chosen = trial; scale = sc; return true; }
-        }
-        return false;
-      };
-
-      // 1) fits as is. The font size is never reduced, so every value keeps the template's own size.
-      let fitted = tryScales([1]);
-      // 2) too long for its slot: let the words that follow on the same line move along instead of shrinking the value
-      if (!fitted && !reflow) {
-        const tail = slots[slots.length - 1];
-        const line = tail.line;
-        const lastX = tail.items[tail.items.length - 1].transform[4];
-        const suffix = line.items.filter((i) => i.transform[4] > lastX + 0.5 && !touched.has(i) && !moved.has(i) && !chars.some((c) => c.item === i && c.gone));
-        if (suffix.length) {
-          const space = fonts.regular.widthOfTextAtSize(' ', tail.size);
-          const sufW = suffix.reduce((w, i) => w + fonts.regular.widthOfTextAtSize(i.str.trim(), fontSizeOf(i)), 0) + space * suffix.length;
-          const original = tail.cap;
-          // the line keeps its original right edge; the moved words are set in the (narrower) regular font
-          tail.cap = Math.max(original, line.maxX - sufW - tail.item.transform[4] - tail.keptW - space);
-          if (tryScales([1])) { fitted = true; suffix.forEach((i) => moved.add(i)); shifts.push({ item: tail.item, suffix }); }
-          else tail.cap = original;
-        }
-      }
-      // 3) last resort: keep the size, the value is cut with "..." below (unless the paragraph is re-typeset)
-      if (!fitted) { scale = 1; chosen = alloc(1); }
-
-      const lastUsed = chosen.buckets.reduce((acc, b, i) => (b.length ? i : acc), -1);
-      const holeAfter = lastUsed >= 0 && lastUsed < slots.length - 1;
-      const gapAfter = lastUsed >= 0 ? slots[lastUsed].cap - fonts.main.widthOfTextAtSize(chosen.buckets[lastUsed].join(' '), slots[lastUsed].size * scale) : 0;
-      if (reflow && (!chosen.ok || holeAfter || gapAfter > 40)) {
-        // would overflow, leave a hole or leave a wide gap before the following text: re-typeset the paragraph instead
-        const plan = planReflow({ lines, chars, spanItem: span[0], s, e, newText: safe(text), fonts, textRgb });
-        plan.items.forEach((item) => touched.set(item, { scale: 1, inserts: [] }));
-        chars.forEach((c) => { if (c.item && plan.items.has(c.item)) c.gone = true; });
-        late.push(plan.draw);
-        continue;
-      }
-      if (!chosen.ok) {
-        chosen = {
-          ...chosen,
-          buckets: chosen.buckets.map((b, i) => (b.length ? [ellipsize(b.join(' '), fonts.main, slots[i].size, slots[i].cap)] : b)),
-        };
-      }
-      slots.forEach((slot, i) => {
-        slot.items.forEach((item, j) => {
-          const t = touched.get(item);
-          t.scale = Math.min(t.scale, scale);
-          let at = s;
-          while (at < e && chars[at].item !== item) at++;
-          t.inserts.push({ at, text: j === 0 ? chosen.buckets[i].join(' ') : '' });
-        });
-      });
-    }
-  });
-
-  // build final strings
-  const rebuilt = new Map();
-  touched.forEach((info, item) => {
-    let str = '';
-    let insertsLeft = [...info.inserts].sort((a, b) => a.at - b.at);
-    chars.forEach((c, idx) => {
-      if (c.item !== item) return;
-      while (insertsLeft.length && insertsLeft[0].at <= idx) str += insertsLeft.shift().text;
-      if (!c.gone) str += c.ch;
-    });
-    insertsLeft.forEach((i) => { str += i.text; });
-    rebuilt.set(item, { str, scale: info.scale });
-  });
-
-  rebuilt.forEach((_, item) => {
-    const size = fontSizeOf(item);
-    const inBanner = item.transform[5] > bannerY;
-    const bg = inBanner ? ctx.banner : { r: 1, g: 1, b: 1 };
-    page.drawRectangle({ x: item.transform[4] - 0.5, y: item.transform[5] - size * 0.4, width: item.width + 1, height: size * 1.55, color: rgb(bg.r, bg.g, bg.b) });
-  });
-  moved.forEach((item) => {
-    const size = fontSizeOf(item);
-    page.drawRectangle({ x: item.transform[4] - 0.5, y: item.transform[5] - size * 0.4, width: item.width + 1, height: size * 1.55, color: rgb(1, 1, 1) });
-  });
-  rebuilt.forEach(({ str, scale }, item) => {
-    if (!str.trim()) return;
-    page.drawText(str, { x: item.transform[4], y: item.transform[5], size: fontSizeOf(item) * scale, font: fonts.main, color: rgb(textRgb.r, textRgb.g, textRgb.b) });
-  });
-  shifts.forEach(({ item, suffix }) => {
-    const info = rebuilt.get(item);
-    const size = fontSizeOf(item);
-    const space = fonts.regular.widthOfTextAtSize(' ', size);
-    let x = item.transform[4] + fonts.main.widthOfTextAtSize(info.str, size * info.scale) + space;
-    suffix.forEach((i) => {
-      const txt = i.str.trim();
-      page.drawText(txt, { x, y: i.transform[5], size: fontSizeOf(i), font: fonts.regular, color: rgb(textRgb.r, textRgb.g, textRgb.b) });
-      x += fonts.regular.widthOfTextAtSize(txt, fontSizeOf(i)) + space;
-    });
-  });
-  late.forEach((draw) => draw(page));
+  }
+  return out;
 };
 
-// Header values ("Date :" / "To :") stay on one line at the template's own size. They may use at most
-// this share of the page width; anything longer is cut with "..." rather than shrunk or wrapped.
-const HEADER_VALUE_MAX_WIDTH_RATIO = 0.4;
-
-/** Date : / To : header lines – filled by label, so blank, placeholder and old values are all handled. */
+/**
+ * Date : / To : header lines – filled by label, so blank, placeholder and old values are all handled.
+ * The line is rewritten as "<label> <value>" in the label's own font, on one line at the template's size.
+ */
 const fillHeaderFields = (page, pageLines, values, ctx) => {
-  const { fonts, safe, pageW, bannerY, textRgb } = ctx;
+  const { font, safe, pageW, bannerY, banner, headerColor } = ctx;
   const fields = [
-    // The date sits directly above "To :" in most banners, so it must stay on one line –
-    // wrapping would push its second line down into (and get erased by) the field below it.
-    { re: /^\s*date\s*:/i, label: 'Date :', value: values.date },
+    // The date sits directly above "To :", so it must stay on one line.
+    { re: /^\s*date\s*:/i, label: 'Date :', candidates: dateCandidates(values.date) },
     // The recipient (the form's "To" field) only ever fills this header line; the form's separate
     // "Company Name" drives the placeholders in the body text.
-    { re: /^\s*to\s*:/i, label: 'To :', value: values.recipient },
+    { re: /^\s*to\s*:/i, label: 'To :', candidates: values.recipient ? [values.recipient] : [] },
   ];
   pageLines.filter((l) => l.y > bannerY).forEach((line) => {
-    fields.forEach(({ re, label, value }) => {
-      if (!value) return;
+    fields.forEach(({ re, label, candidates }) => {
+      if (!candidates.length) return;
       const idx = line.items.findIndex((i) => re.test(i.str));
       if (idx < 0) return;
       const labelItem = line.items[idx];
-      const labelOnly = labelItem.str.replace(re, '').trim() === '';
       const size = fontSizeOf(labelItem);
+      const labelFamily = !labelItem.family || labelItem.family === 'other' ? 'helvetica' : labelItem.family;
+      const f = font(ctx.value.family === 'auto' ? labelFamily : ctx.value.family, labelItem.bold || ctx.value.bold, labelItem.italic || ctx.value.italic);
+      const x = labelItem.transform[4];
+      const maxW = pageW - HEADER_RIGHT_MARGIN - x;
+      const texts = candidates.map((c) => safe(`${label} ${c}`, f));
 
-      const x = labelOnly ? labelItem.transform[4] + labelItem.width + fonts.main.widthOfTextAtSize(' ', size) : labelItem.transform[4];
-      const maxW = Math.min(pageW - RIGHT_MARGIN - x, pageW * HEADER_VALUE_MAX_WIDTH_RATIO);
-
+      // Always the template's own size: a date that is too wide falls back to a shorter spelling of the
+      // same day, anything else is cut with "...".
       const fs = size;
-      const wrapped = [ellipsize(safe(labelOnly ? value : `${label} ${value}`), fonts.main, fs, maxW)];
-      const lineH = fs * 1.3;
-      const bandTop = labelItem.transform[5] + fs * 1.15;
-      const bandBottom = labelItem.transform[5] - fs * 0.4 - lineH * (wrapped.length - 1);
-      page.drawRectangle({ x: x - 0.5, y: bandBottom, width: pageW - RIGHT_MARGIN - x + 0.5, height: bandTop - bandBottom, color: rgb(ctx.banner.r, ctx.banner.g, ctx.banner.b) });
+      const text = texts.find((t) => f.widthOfTextAtSize(t, fs) <= maxW) || ellipsize(texts[texts.length - 1], f, fs, maxW);
 
-      wrapped.forEach((ln, i) => {
-        page.drawText(ln, { x, y: labelItem.transform[5] - i * lineH, size: fs, font: fonts.main, color: rgb(textRgb.r, textRgb.g, textRgb.b) });
+      line.items.slice(idx).forEach((item) => {
+        const s = fontSizeOf(item);
+        page.drawRectangle({ x: item.transform[4] - 0.75, y: item.transform[5] - s * 0.3, width: item.width + 1.5, height: s * 1.3, color: rgb(banner.r, banner.g, banner.b) });
       });
+      page.drawText(text, { x, y: labelItem.transform[5], size: fs, font: f, color: rgb(headerColor.r, headerColor.g, headerColor.b) });
     });
   });
 };
 
 /* ── table ─────────────────────────────────────────────────────────────── */
 
-// One text size for every cell of every row: long content wraps and the rows grow (spilling onto
-// continuation pages when needed) instead of the font shrinking.
+// One text size for every cell of every row. When there are many rows only the padding tightens;
+// rows that still do not fit continue on an extra page.
 const LEVELS = [
   { fs: 10, padX: 5, padY: 8, minH: 30 },
+  { fs: 10, padX: 5, padY: 5, minH: 24 },
+  { fs: 10, padX: 4, padY: 3, minH: 19 },
 ];
 
 const rowCells = (row, index) => [String(index + 1), row?.role ?? '', String(row?.positions ?? ''), row?.qualifications ?? '', row?.package ?? ''];
@@ -673,11 +501,9 @@ const layoutRow = (cells, cols, lvl, fonts, safe) => {
   const sizes = [];
   const wrapped = cells.map((raw, c) => {
     const font = c === 1 ? fonts.bold : fonts.regular;
-    const txt = safe(raw);
     const maxW = cols[c + 1] - cols[c] - lvl.padX * 2;
-    const fs = lvl.fs;
-    sizes.push(fs);
-    return wrapText(txt, font, fs, maxW);
+    sizes.push(lvl.fs);
+    return wrapText(safe(raw, font), font, lvl.fs, maxW);
   });
   const lineH = lvl.fs * 1.25;
   const natural = Math.max(...wrapped.map((w) => w.length)) * lineH + lvl.padY * 2;
@@ -698,7 +524,7 @@ const drawRow = (page, layout, yTop, cols, lvl, fonts) => {
         y: lineCenter - fs * 0.35,
         size: fs,
         font,
-        color: c === 0 ? rgb(0.25, 0.25, 0.25) : rgb(0.07, 0.07, 0.12),
+        color: rgb(0.07, 0.07, 0.12),
       });
     });
   });
@@ -725,11 +551,14 @@ const applyTable = (page, table, pageLines, rows, ctx) => {
       page.drawRectangle({ x: x - 0.8, y: y - size * 0.35, width: i.width + 1.6, height: size * 1.5, color: white });
     }
   }));
-  table.seps.forEach((sy) => {
-    for (let c = 0; c < cols.length - 1; c++) {
-      page.drawRectangle({ x: cols[c] + lw / 2 + 0.2, y: sy - lw - 1.4, width: cols[c + 1] - cols[c] - lw - 0.4, height: lw * 2 + 2.8, color: white });
-    }
+  table.seps.forEach((sy, k) => {
+    // the template's own row dividers are wiped across the full width (keeping the watermark behind them) ...
+    const band = lw + 1.6;
+    const fills = table.sepFills?.[k] || [{ x0: left - lw, x1: right + lw, color: { r: 1, g: 1, b: 1 } }];
+    fills.forEach(({ x0, x1, color }) => page.drawRectangle({ x: x0, y: sy - band, width: x1 - x0, height: band * 2, color: rgb(color.r, color.g, color.b) }));
   });
+  // ... and the column rules are then redrawn over their whole height, so no notch shows where a divider was
+  if (table.seps.length && !table.guessed) cols.forEach((x) => drawLine(page, x, table.top + lw / 2, x, bottom - lw / 2, lw));
 
   // 2. choose the largest text size at which the rows fit the body
   let lvl = LEVELS[LEVELS.length - 1];
@@ -769,28 +598,33 @@ const applyTable = (page, table, pageLines, rows, ctx) => {
 };
 
 const addContinuationPages = async (pdfDoc, job, ctx) => {
-  const { fonts, safe, pageH, pageY0 } = ctx;
+  const { fonts, safe, pageH, pageY0, sourceDoc, fillHeader } = ctx;
   const { pageIndex, table, rows, from, lvl } = job;
   const { cols, lw } = table;
   const left = cols[0];
   const right = cols[cols.length - 1];
-  const pages = pdfDoc.getPages();
-  const frameIdx = pageIndex + 1 < pages.length ? pageIndex + 1 : pageIndex; // a page that carries the banner + footer
+  // a page that carries the banner + footer (indexes refer to the pristine template)
+  const frameIdx = pageIndex + 1 < sourceDoc.getPageCount() ? pageIndex + 1 : pageIndex;
   const bannerTop = pageY0 + pageH * BANNER_RATIO;
   const contentTop = bannerTop - 18;
   const contentBottom = pageY0 + pageH * FOOTER_RATIO + 22;
   const headerH = 30;
+  const headFs = Math.min(table.headerSize || 10, 11);
 
   let cursor = from;
   let insertAt = pageIndex + 1;
   while (cursor < rows.length) {
-    // the frame page moves one slot for every continuation page already inserted before it
-    const [copy] = await pdfDoc.copyPages(pdfDoc, [frameIdx === pageIndex ? frameIdx : frameIdx + (insertAt - (pageIndex + 1))]);
+    // Copied from the untouched template, not from the document being filled: copying a page of `pdfDoc`
+    // would flush it, and pdf-lib cannot embed a subset font twice.
+    const [copy] = await pdfDoc.copyPages(sourceDoc, [frameIdx]);
+    fillHeader(copy, frameIdx);
+    // marks the page as generated, so it is dropped when the template is restored from a filled file
+    copy.node.set(PDFName.of(CONTINUATION_KEY), PDFBool.True);
     const { width } = copy.getSize();
     // clear everything between the banner and the footer band that the copied page carried
     const clearBottom = pageY0 + pageH * FOOTER_CLEAR_RATIO;
     copy.drawRectangle({ x: 0, y: clearBottom, width, height: bannerTop - 8 - clearBottom, color: rgb(1, 1, 1) });
-    copy.drawText('POSITION REQUIREMENTS (CONTD.):', { x: left, y: contentTop - 14, size: 13, font: fonts.bold, color: rgb(0, 0, 0) });
+    copy.drawText('POSITION REQUIREMENTS (CONTD.):', { x: left, y: contentTop - 14, size: 14, font: fonts.bold, color: rgb(0, 0, 0) });
 
     const tableTop = contentTop - 32;
     const avail = tableTop - headerH - contentBottom;
@@ -806,8 +640,8 @@ const addContinuationPages = async (pdfDoc, job, ctx) => {
     drawLine(copy, left, tableTop, right, tableTop, lw);
     drawLine(copy, left, tableTop - headerH, right, tableTop - headerH, lw);
     TABLE_HEADERS.forEach((label, c) => {
-      const w = fonts.bold.widthOfTextAtSize(label, 10);
-      copy.drawText(label, { x: (cols[c] + cols[c + 1]) / 2 - w / 2, y: tableTop - headerH / 2 - 3.5, size: 10, font: fonts.bold, color: rgb(0, 0, 0) });
+      const w = fonts.bold.widthOfTextAtSize(label, headFs);
+      copy.drawText(label, { x: (cols[c] + cols[c + 1]) / 2 - w / 2, y: tableTop - headerH / 2 - headFs * 0.35, size: headFs, font: fonts.bold, color: rgb(0, 0, 0) });
     });
     let y = tableTop - headerH;
     chunk.forEach((lay) => { drawRow(copy, lay, y, cols, lvl, fonts); y -= lay.height; drawLine(copy, left, y, right, y, lw); });
@@ -824,26 +658,22 @@ const addContinuationPages = async (pdfDoc, job, ctx) => {
  * Public entry point
  * ────────────────────────────────────────────────────────────────────────── */
 
-export async function fillQuotation(pdfBytes, analysis, values, style = {}) {
+/**
+ * @param pdfBytes  the pristine template
+ * @param analysis  result of analyzeTemplate() for the same bytes
+ * @param values    { date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions }
+ * @param style     { valueFont: 'auto' | 'Helvetica' | 'Times New Roman', isBold, isItalic, textColor }
+ * @param options   { fontLoader } – override how bundled font files are fetched (tests)
+ */
+export async function fillQuotation(pdfBytes, analysis, values, style = {}, options = {}) {
   const warnings = new Set();
-  const pdfDoc = await PDFDocument.load(pdfBytes);
-  const { fontFamily = 'Montserrat', isBold = true, isItalic = false, textColor = '#111827' } = style;
-
-  let mainFont = StandardFonts.Helvetica;
-  if (fontFamily === 'Times New Roman') {
-    mainFont = isBold && isItalic ? StandardFonts.TimesRomanBoldItalic : isBold ? StandardFonts.TimesRomanBold : isItalic ? StandardFonts.TimesRomanItalic : StandardFonts.TimesRoman;
-  } else if (isBold && isItalic) mainFont = StandardFonts.HelveticaBoldOblique;
-  else if (isBold) mainFont = StandardFonts.HelveticaBold;
-  else if (isItalic) mainFont = StandardFonts.HelveticaOblique;
-
-  const fonts = {
-    main: await pdfDoc.embedFont(mainFont),
-    bold: await pdfDoc.embedFont(StandardFonts.HelveticaBold),
-    regular: await pdfDoc.embedFont(StandardFonts.Helvetica),
-  };
   const unsupported = new Set();
-  const safe = makeTextTools(fonts.regular, warnings, unsupported);
-  const textRgb = hexToRgb(textColor);
+  const pdfDoc = await PDFDocument.load(pdfBytes);
+  const { valueFont = 'auto', isBold = true, isItalic = false, textColor = DEFAULT_TEXT_COLOR } = style;
+  const valueFamily = valueFont === 'Times New Roman' ? 'times' : valueFont === 'Helvetica' ? 'helvetica' : 'auto';
+  // values follow the colour of the text around them unless a colour was picked in the toolbar
+  const pickedColor = textColor && textColor.toLowerCase() !== DEFAULT_TEXT_COLOR ? hexToRgb(textColor) : null;
+  const value = { family: valueFamily, bold: isBold, italic: isItalic, color: pickedColor };
 
   const clean = {
     date: values.date?.trim(),
@@ -851,6 +681,7 @@ export async function fillQuotation(pdfBytes, analysis, values, style = {}) {
     recipient: values.recipient?.trim(),
     replacementGuarantee: values.replacementGuarantee?.trim(),
     serviceFee: values.serviceFee?.trim(),
+    advanceAmount: values.advanceAmount?.trim(),
   };
   const replacements = buildReplacements(clean);
 
@@ -859,33 +690,71 @@ export async function fillQuotation(pdfBytes, analysis, values, style = {}) {
   const rowCount = Math.max(positions.length, requested);
   const rows = Array.from({ length: rowCount }, (_, i) => positions[i] || null);
 
+  // 1. find what has to change on each page (no fonts needed yet)
   const pages = pdfDoc.getPages();
-  const continuations = [];
-  for (let p = 0; p < pages.length; p++) {
-    const page = pages[p];
-    const { width: pageW, height: pageH } = page.getSize();
+  const plans = pages.map((page, p) => {
+    const rawLines = analysis.pdfLines.filter((l) => l.page === p + 1);
+    const lines = segmentLines(rawLines);
+    const chars = buildStream(lines);
     const pageY0 = page.getMediaBox().y;
-    const ctx = { fonts, safe, pageW, pageH, pageY0, bannerY: pageY0 + pageH * BANNER_RATIO, textRgb, banner: analysis.bannerRgb || BANNER_RGB };
-    const pageLines = analysis.pdfLines.filter((l) => l.page === p + 1);
+    const { width: pageW, height: pageH } = page.getSize();
+    return { rawLines, lines, chars, edits: findEdits(chars, replacements), pageW, pageH, pageY0, bannerY: pageY0 + pageH * BANNER_RATIO };
+  });
 
-    try { fillHeaderFields(page, pageLines, { date: clean.date, recipient: clean.recipient }, ctx); } catch (e) { console.error('Header fill failed:', e); }
-    try { applyReplacements(page, pageLines, replacements, ctx); } catch (e) { console.error('Text replacement failed:', e); }
+  // 2. embed the fonts those changes need: the typefaces of the lines being re-typeset
+  const wanted = [];
+  const want = (family, bold, italic) => wanted.push({ family: !family || family === 'other' ? 'helvetica' : family, bold: Boolean(bold), italic: Boolean(italic) });
+  if (valueFamily !== 'auto') { want(valueFamily, isBold, isItalic); want(valueFamily, true, isItalic); }
+  plans.forEach((plan) => {
+    if (plan.edits.length) {
+      plan.lines.forEach((l) => l.items.forEach((i) => { want(i.family, i.bold, i.italic); want(i.family, false, false); want(i.family, isBold, isItalic); }));
+    }
+    plan.lines.filter((l) => l.y > plan.bannerY).forEach((l) => l.items.forEach((i) => {
+      if (/^\s*(date|to)\s*:/i.test(i.str)) want(i.family, i.bold || isBold, i.italic || isItalic);
+    }));
+  });
+  analysis.tables.forEach((t) => { want(t.family, false, false); want(t.family, true, false); });
+  const font = await createFontBook(pdfDoc, wanted, { loader: options.fontLoader, warnings });
+  const safe = makeSafeText(warnings, unsupported);
+  const banner = analysis.bannerRgb || BANNER_RGB;
+  const tableFonts = (table) => {
+    const family = !table.family || table.family === 'other' ? 'helvetica' : table.family;
+    return { regular: font(family, false, false), bold: font(family, true, false) };
+  };
+
+  // 3. write
+  const continuations = [];
+  let sourceDoc = null;
+  const ctxOf = (plan) => ({ font, safe, value, warnings, banner, pageW: plan.pageW, bannerY: plan.bannerY, defaultColor: hexToRgb(textColor), headerColor: hexToRgb(textColor) });
+  // `p` is the page's index in the template, whose text lines describe the header
+  const fillHeader = (page, p) => {
+    try { fillHeaderFields(page, plans[p].rawLines, { date: clean.date, recipient: clean.recipient }, ctxOf(plans[p])); } catch (e) { console.error('Header fill failed:', e); }
+  };
+  pages.forEach((page, p) => {
+    const plan = plans[p];
+    const ctx = ctxOf(plan);
+
+    fillHeader(page, p);
+    // header lines are handled above; the body never re-typesets them
+    const bodyEdits = plan.edits.filter((ed) => plan.lines[plan.chars[ed.s].line].y <= plan.bannerY);
+    try { applyEdits(page, plan.lines, plan.chars, bodyEdits, ctx); } catch (e) { console.error('Text replacement failed:', e); }
 
     if (rowCount > 0) {
       analysis.tables.filter((t) => t.page === p + 1).forEach((table) => {
         try {
-          const { overflowFrom, lvl } = applyTable(page, table, pageLines, rows, ctx);
-          if (overflowFrom >= 0) continuations.push({ pageIndex: p, table, rows, from: overflowFrom, lvl });
+          const fonts = tableFonts(table);
+          const { overflowFrom, lvl } = applyTable(page, table, plan.rawLines, rows, { fonts, safe });
+          if (overflowFrom >= 0) continuations.push({ pageIndex: p, table, rows, from: overflowFrom, lvl, fonts });
         } catch (e) { console.error('Table fill failed:', e); }
       });
     }
-  }
+  });
 
   // last tables first so earlier page indexes stay valid while inserting
   for (const job of continuations.sort((a, b) => b.pageIndex - a.pageIndex)) {
-    const { height: pageH } = pdfDoc.getPage(job.pageIndex).getSize();
-    const pageY0 = pdfDoc.getPage(job.pageIndex).getMediaBox().y;
-    const added = await addContinuationPages(pdfDoc, job, { fonts, safe, pageH, pageY0 });
+    const plan = plans[job.pageIndex];
+    sourceDoc ||= await PDFDocument.load(pdfBytes);
+    const added = await addContinuationPages(pdfDoc, job, { fonts: job.fonts, safe, pageH: plan.pageH, pageY0: plan.pageY0, sourceDoc, fillHeader });
     if (added) warnings.add(`${rows.length - job.from} position row(s) did not fit the table and continue on ${added} extra page(s).`);
   }
 

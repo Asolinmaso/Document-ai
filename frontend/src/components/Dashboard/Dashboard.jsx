@@ -646,9 +646,9 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
           isEdit
           docName={selectedDoc.name}
           initialElements={selectedDoc.templateElements || null}
-          sourceFile={selectedDoc.file}
+          sourceFile={selectedDoc.templateFile || selectedDoc.file}
           onBack={() => setCurrentSubView('editor')}
-          onSave={(data) => handleSaveTemplateEdit(selectedDoc.id, { name: data.name, file: data.file, templateElements: data.templateElements })}
+          onSave={(data) => handleSaveTemplateEdit(selectedDoc.id, { name: data.name, file: data.file, templateFile: data.file, templateElements: data.templateElements })}
         />
       );
     }

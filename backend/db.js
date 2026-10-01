@@ -284,6 +284,9 @@ export async function initSchema() {
     await client.query(`ALTER TABLE documents ALTER COLUMN updated_at SET DEFAULT NOW()`);
     // Widgets of a template built in the Template Editor, so the template can be re-opened and edited later.
     try { await client.query(`ALTER TABLE documents ADD COLUMN template_elements JSONB`); } catch (e) {}
+    // The untouched template a quotation is generated from. `file` holds the filled result; every new fill
+    // starts from this copy so values are never written on top of an already filled PDF.
+    try { await client.query(`ALTER TABLE documents ADD COLUMN template_file TEXT`); } catch (e) {}
 
 
     console.log('PostgreSQL schema structure verified.');

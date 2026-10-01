@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { buildTemplatePdf, uint8ArrayToBase64, CANVAS_WIDTH_PX, CANVAS_HEIGHT_PX } from '../../utils/templateBuilder';
 import { importPdfAsTemplate } from '../../utils/templateImport';
+import { restoreTemplate } from '../../utils/templateRestore';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
@@ -288,7 +289,9 @@ const TemplateEditorView = ({ onBack, onSave, docName = 'New Quotation Template'
     (async () => {
       try {
         const bytes = Uint8Array.from(atob(sourceFile.split(',')[1] || sourceFile), (c) => c.charCodeAt(0));
-        const imported = await importPdfAsTemplate(pdfjsLib, bytes);
+        // a file that was filled in before is first turned back into its blank template
+        const { bytes: pristine } = await restoreTemplate(bytes);
+        const imported = await importPdfAsTemplate(pdfjsLib, pristine);
         if (!cancelled) setElements(imported);
       } catch (err) {
         console.error('Could not convert the PDF into editable widgets:', err);

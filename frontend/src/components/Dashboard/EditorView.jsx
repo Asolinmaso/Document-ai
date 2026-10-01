@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import { analyzeTemplate, fillQuotation } from '../../utils/quotationEngine';
+import { restoreTemplate } from '../../utils/templateRestore';
 import { downloadPdf, statusMeta } from '../../utils/docs';
 import { sendMail } from '../../services/dataService';
 import ConfirmDialog from '../ConfirmDialog';
@@ -165,6 +166,7 @@ const EditorToolbar = memo(({ fontFamily, setFontFamily, fontSize, setFontSize, 
   }}>
     <div style={{ paddingRight: '16px', borderRight: '1px solid #E5E7EB' }}>
       <select value={fontFamily} onChange={(e) => setFontFamily(e.target.value)} style={{ border: 'none', background: 'transparent', fontSize: '13px', fontWeight: '500', outline: 'none', color: '#4B5563', cursor: 'pointer' }}>
+        <option value="auto">Template font</option>
         <option value="Helvetica">Helvetica (Sans)</option>
         <option value="Times New Roman">Times New Roman (Serif)</option>
       </select>
@@ -334,6 +336,17 @@ const PositionsList = memo(({ positions, editingId, onEdit, onDelete }) => {
   );
 });
 
+const uint8ArrayToBase64 = (bytes) => {
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.byteLength; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return window.btoa(binary);
+};
+
+const sameValues = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
 const escapeHtml = (text) => String(text).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onEditTemplate, onDeleteDoc, showToast, initialPreview = false }) => {
@@ -358,38 +371,21 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
 
   const loadInitialState = (key, defaultVal) => (savedState[key] !== undefined ? savedState[key] : defaultVal);
 
-  // Returns today's date as "JUNE 19,2026" to match template header format
-  const getTodayFormatted = () => {
-    const now = new Date();
-    const month = now.toLocaleString('en-US', { month: 'long' }).toUpperCase();
-    const day = now.getDate();
-    const year = now.getFullYear();
-    return `${month} ${day},${year}`;
-  };
+  // Dates are written the way the template design shows them: "19 June, 2026"
+  const formatDate = (d) => `${d.getDate()} ${d.toLocaleString('en-US', { month: 'long' })}, ${d.getFullYear()}`;
+  // YYYY-MM-DD in local time for the date picker (toISOString would give the UTC day)
+  const toISODate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-  // Returns today in YYYY-MM-DD for the date picker input
-  const getTodayISO = () => {
-    const now = new Date();
-    return now.toISOString().split('T')[0];
-  };
+  const getTodayFormatted = () => formatDate(new Date());
+  const getTodayISO = () => toISODate(new Date());
 
-  // Convert YYYY-MM-DD → "JUNE 19,2026"
-  const formatDateForTemplate = (isoDate) => {
-    if (!isoDate) return '';
-    const d = new Date(isoDate + 'T00:00:00');
-    const month = d.toLocaleString('en-US', { month: 'long' }).toUpperCase();
-    const day = d.getDate();
-    const year = d.getFullYear();
-    return `${month} ${day},${year}`;
-  };
+  // Convert YYYY-MM-DD → "19 June, 2026"
+  const formatDateForTemplate = (isoDate) => (isoDate ? formatDate(new Date(`${isoDate}T00:00:00`)) : '');
 
-  // Convert formatted date back to YYYY-MM-DD for the picker
+  // Convert a typed date back to YYYY-MM-DD for the picker
   const parseFormattedDate = (formatted) => {
-    try {
-      const d = new Date(formatted.replace(',', ' '));
-      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-    } catch (e) {}
-    return getTodayISO();
+    const d = new Date(String(formatted).replace(/,/g, ', '));
+    return Number.isNaN(d.getTime()) ? getTodayISO() : toISODate(d);
   };
 
   const [date, setDate] = useState(() => loadInitialState('date', getTodayFormatted()));
@@ -417,7 +413,8 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
   const [editingPositionId, setEditingPositionId] = useState(null);
 
   // Toolbar State
-  const [fontFamily, setFontFamily] = useState(() => loadInitialState('fontFamily', 'Helvetica'));
+  // Typeface of the filled-in values: 'auto' follows the template's own font
+  const [valueFont, setValueFont] = useState(() => loadInitialState('valueFont', 'auto'));
   const [fontSize, setFontSize] = useState(() => loadInitialState('fontSize', 16));
   const [isBold, setIsBold] = useState(() => loadInitialState('isBold', true));
   const [isItalic, setIsItalic] = useState(() => loadInitialState('isItalic', false));
@@ -428,14 +425,14 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
 
   // The form fields are typed into freely; the document only changes when the user applies them (Update Data /
   // Save / Finalize / Send). `applied` is the snapshot the preview and downloads are generated from.
-  const snapshot = () => ({ date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, positions, fontFamily, isBold, isItalic, textColor });
+  const snapshot = () => ({ date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions, valueFont, isBold, isItalic, textColor });
   const [applied, setApplied] = useState(snapshot);
 
   // Persisted to localStorage ~400ms after the user stops changing anything, instead of on
   // every keystroke — avoids a synchronous JSON.stringify + write on each character typed.
   const autosaveBaseline = React.useRef(null); // initial values: untouched state must not be stamped "newer than the server"
   useEffect(() => {
-    const values = { date: date || undefined, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
+    const values = { date: date || undefined, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, valueFont, fontSize, isBold, isItalic, isUnderline, align, listType, textColor };
     const serialized = JSON.stringify(values);
     if (autosaveBaseline.current === null) autosaveBaseline.current = serialized;
     if (serialized === autosaveBaseline.current) return undefined;
@@ -443,18 +440,40 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
       try { localStorage.setItem(storageKey, JSON.stringify({ ...values, _ts: Date.now() })); } catch { /* storage full or blocked */ }
     }, 400);
     return () => clearTimeout(timer);
-  }, [storageKey, date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, fontFamily, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
+  }, [storageKey, date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, docName, positions, valueFont, fontSize, isBold, isItalic, isUnderline, align, listType, textColor]);
 
-  // Template analysis: text lines, table grid and banner colour are measured once per uploaded PDF
+  // The quotation is always generated from the pristine template, never from an already filled PDF
+  // (filling a filled file stacks text on top of the old text and repeats tables). Documents saved
+  // before the template was stored separately only have the filled file, so it is restored once here.
+  const [templateData, setTemplateData] = useState(() => doc?.templateFile || null);
+  useEffect(() => {
+    if (templateData || !fileData) return undefined;
+    let cancelled = false;
+    (async () => {
+      let restored = fileData;
+      try {
+        const bytes = Uint8Array.from(atob(fileData.split(',')[1] || fileData), c => c.charCodeAt(0));
+        const result = await restoreTemplate(bytes);
+        if (result.changed) restored = `data:application/pdf;base64,${uint8ArrayToBase64(result.bytes)}`;
+      } catch (err) {
+        console.error('Could not restore the template from the saved file:', err);
+      }
+      if (!cancelled) setTemplateData(restored);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Template analysis: text lines, fonts, colours, table grid and banner colour are measured once per template
   const [analysis, setAnalysis] = useState(null);
   const [fillWarnings, setFillWarnings] = useState([]);
 
   useEffect(() => {
-    if (!fileData) return;
+    if (!templateData) return;
     let cancelled = false;
     (async () => {
       try {
-        const base64Data = fileData.split(',')[1] || fileData;
+        const base64Data = templateData.split(',')[1] || templateData;
         const pdfBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
         const result = await analyzeTemplate(pdfjsLib, pdfBytes);
         if (cancelled) return;
@@ -474,7 +493,8 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
       }
     })();
     return () => { cancelled = true; };
-  }, [fileData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateData]);
 
   // Preview State
   const [previewPdfData, setPreviewPdfData] = useState(null);
@@ -509,15 +529,6 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
     };
   }, [previewPdfData, fileData]);
 
-  const uint8ArrayToBase64 = (bytes) => {
-    let binary = '';
-    const len = bytes.byteLength;
-    const chunkSize = 8192;
-    for (let i = 0; i < len; i += chunkSize) {
-      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
-    }
-    return window.btoa(binary);
-  };
 
   // Live PDF generation (debounced; stale runs are discarded). This is the one genuinely
   // expensive step (PDF-lib fill + re-render), so it — not the input fields — is what waits
@@ -525,11 +536,11 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
   const runId = React.useRef(0);
 
   const generatePreview = async (forDownload = false, values = applied) => {
-    if (!fileData || !analysis) return null;
+    if (!templateData || !analysis) return null;
     const myRun = ++runId.current;
 
     try {
-      const base64Data = fileData.split(',')[1] || fileData;
+      const base64Data = templateData.split(',')[1] || templateData;
       const pdfBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
 
       const { bytes, warnings } = await fillQuotation(
@@ -573,7 +584,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
   };
 
   useEffect(() => {
-    if (!fileData || !analysis) return;
+    if (!templateData || !analysis) return;
     const timer = setTimeout(() => { generatePreview(); }, 50);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -581,17 +592,23 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
 
   const [isSaving, setIsSaving] = useState(false);
 
-  const buildQuotationData = () => ({ date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions, fontFamily, isBold, isItalic, textColor });
+  const buildQuotationData = () => ({ date, recipient, companyName, totalRequirements, replacementGuarantee, serviceFee, advanceAmount, positions, valueFont, isBold, isItalic, textColor });
 
   // Persists the form to the server (not just localStorage) so drafts/history survive across browsers and devices.
   // Drafts and sent copies are their own records: saving one from a template/final document creates a new
   // document and leaves the original untouched, instead of turning the template itself into a draft.
   const persist = async (targetStatus, prebuiltFile = null) => {
     const snap = snapshot();
-    setApplied(snap);
+    setApplied((prev) => (sameValues(prev, snap) ? prev : snap)); // an unchanged form does not re-render the document
     const dataUrl = prebuiltFile || (analysis ? await generatePreview(true, snap) : null);
     let name = docName.trim() || fileName;
-    const payload = { status: targetStatus, quotationData: buildQuotationData(), ...(dataUrl ? { file: dataUrl } : {}) };
+    const payload = {
+      status: targetStatus,
+      quotationData: buildQuotationData(),
+      ...(dataUrl ? { file: dataUrl } : {}),
+      // stored once, so later fills always start from the untouched template
+      ...(templateData && !doc.templateFile ? { templateFile: templateData } : {}),
+    };
     const createsNew = !isDraft && (targetStatus === 'draft' || targetStatus === 'sent');
     if (createsNew) {
       if (name === doc.name && companyName.trim()) name = `${name} - ${companyName.trim()}`;
@@ -600,6 +617,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
         name,
         type: doc.type || 'Quotation',
         file: dataUrl || doc.file || '',
+        ...(templateData ? { templateFile: templateData } : {}),
         ...(doc.templateElements ? { templateElements: doc.templateElements } : {}),
       });
       try { localStorage.removeItem(storageKey); } catch { /* storage blocked */ }
@@ -608,14 +626,23 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
     return onSaveQuotation(doc.id, { ...payload, name });
   };
 
+  const lastSaved = React.useRef(null); // what the last successful save contained
   const runSave = async (targetStatus, successMessage) => {
     if (!doc || !onSaveQuotation) {
       showToast?.('Nothing to save yet — upload or open a document first.', 'warning');
       return;
     }
+    if (isSaving) return;
+    // Clicking again without changing anything neither saves nor re-renders the document
+    const signature = JSON.stringify({ targetStatus, id: doc.id, name: docName, data: buildQuotationData() });
+    if (signature === lastSaved.current) {
+      showToast?.('Already up to date.', 'info');
+      return;
+    }
     setIsSaving(true);
     try {
       await persist(targetStatus);
+      lastSaved.current = signature;
       showToast?.(successMessage, 'success');
     } catch (err) {
       console.error('Failed to save quotation:', err);
@@ -634,7 +661,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
     setIsSending(true);
     try {
       const snap = snapshot();
-      setApplied(snap);
+      setApplied((prev) => (sameValues(prev, snap) ? prev : snap));
       const dataUrl = analysis ? await generatePreview(true, snap) : fileData;
       if (!dataUrl) throw new Error('There is no document to send.');
       const result = await sendMail({
@@ -872,7 +899,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
       {/* Toolbar */}
       {!isPreviewMode && (
         <EditorToolbar
-          fontFamily={fontFamily} setFontFamily={setFontFamily}
+          fontFamily={valueFont} setFontFamily={setValueFont}
           fontSize={fontSize} setFontSize={setFontSize}
           isBold={isBold} setIsBold={setIsBold}
           isItalic={isItalic} setIsItalic={setIsItalic}
@@ -923,7 +950,7 @@ const EditorView = ({ onBack, doc, logo, onSaveQuotation, onCreateQuotation, onE
                     type="text"
                     value={date}
                     onChange={e => setDate(e.target.value)}
-                    placeholder="e.g. JUNE 19,2026"
+                    placeholder="e.g. 19 June, 2026"
                     title="Auto-filled from date picker above. You can also edit manually."
                     style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid #E5E7EB', outline: 'none', fontSize: '11px', color: '#5D1CC9', fontWeight: '600', background: '#F5F3FF' }}
                   />
