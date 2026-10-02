@@ -12,15 +12,19 @@ const TrashView = ({ docs = [], onRestore, onDeletePermanently, onEmptyTrash, sh
     setSelectedDocs(e.target.checked ? docs.map((d) => d.id) : []);
   };
 
-  const handleRestore = (id, name) => {
-    onRestore(id);
+  const selectedCount = selectedDocs.filter((id) => docs.some((d) => d.id === id)).length;
+
+  const handleRestore = async (id, name) => {
+    const ok = await onRestore(id);
     setSelectedDocs((prev) => prev.filter((x) => x !== id));
-    showToast?.(`"${name}" restored successfully.`, 'success');
+    if (ok) showToast?.(`"${name}" restored successfully.`, 'success');
   };
 
-  const handleRestoreSelected = () => {
-    selectedDocs.forEach((id) => onRestore(id));
-    showToast?.(`${selectedDocs.length} item(s) restored.`, 'success');
+  const handleRestoreSelected = async () => {
+    const ids = selectedDocs.filter((id) => docs.some((d) => d.id === id));
+    const results = await Promise.all(ids.map((id) => onRestore(id)));
+    const restored = results.filter(Boolean).length;
+    if (restored > 0) showToast?.(`${restored} item(s) restored.`, 'success');
     setSelectedDocs([]);
   };
 
@@ -33,12 +37,15 @@ const TrashView = ({ docs = [], onRestore, onDeletePermanently, onEmptyTrash, sh
   };
 
   const confirmAction = () => {
-    if (confirming === 'empty') {
-      onEmptyTrash();
-    } else {
-      onDeletePermanently(confirming);
-    }
+    const target = confirming;
     setConfirming(null);
+    if (target === 'empty') {
+      onEmptyTrash();
+      setSelectedDocs([]);
+    } else {
+      onDeletePermanently(target);
+      setSelectedDocs((prev) => prev.filter((x) => x !== target));
+    }
   };
 
   return (
@@ -91,10 +98,10 @@ const TrashView = ({ docs = [], onRestore, onDeletePermanently, onEmptyTrash, sh
         <div style={{ display: 'flex', gap: '10px' }}>
           <button
             onClick={handleRestoreSelected}
-            disabled={selectedDocs.length === 0}
-            style={{ background: 'white', border: '1.5px solid #5D1CC9', color: '#5D1CC9', padding: '9px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: selectedDocs.length === 0 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: selectedDocs.length === 0 ? 0.4 : 1, transition: 'all 0.2s' }}
+            disabled={selectedCount === 0}
+            style={{ background: 'white', border: '1.5px solid #5D1CC9', color: '#5D1CC9', padding: '9px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: selectedCount === 0 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: selectedCount === 0 ? 0.4 : 1, transition: 'all 0.2s' }}
           >
-            <RotateCcw size={14} /> Restore Selected ({selectedDocs.length})
+            <RotateCcw size={14} /> Restore Selected ({selectedCount})
           </button>
           <button
             onClick={handleEmptyTrash}
@@ -121,7 +128,7 @@ const TrashView = ({ docs = [], onRestore, onDeletePermanently, onEmptyTrash, sh
                 <input
                   type="checkbox"
                   style={{ cursor: 'pointer', accentColor: '#5D1CC9' }}
-                  checked={selectedDocs.length === docs.length && docs.length > 0}
+                  checked={selectedCount === docs.length && docs.length > 0}
                   onChange={toggleSelectAll}
                 />
               </th>

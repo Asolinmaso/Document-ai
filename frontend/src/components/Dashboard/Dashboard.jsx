@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import DocumentView from './DocumentView';
 import QuotationView from './QuotationView';
 import QuotationHistoryView from './QuotationHistoryView';
@@ -31,6 +31,7 @@ import {
   FilePen,
   History,
   Menu,
+  X,
 } from 'lucide-react';
 import { useNow } from '../../hooks/useNow';
 import { isLiveDoc, isQuotationDoc, lastUpdatedLabel } from '../../utils/docs';
@@ -67,68 +68,70 @@ const SolidDocIcon = ({ color, size = 'md' }) => {
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
-const Sidebar = ({ activeTab, onTabClick, onLogout, currentUser, draftCount, open }) => {
-  const menuItems = [
-    { name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
-    { name: 'Document', icon: <FileText size={18} /> },
-    { name: 'AI Extract', icon: <Sparkles size={18} /> },
-    { name: 'Template', icon: <Layers size={18} /> },
-    { name: 'Drafts', icon: <FilePen size={18} />, badge: draftCount },
-    { name: 'History', icon: <History size={18} /> },
-    { name: 'Mail Center', icon: <Mail size={18} /> },
-    { name: 'My Profile', icon: <User size={18} /> },
-    { name: 'Trash', icon: <Trash2 size={18} /> },
-  ];
+const NAV_SECTIONS = [
+  { label: 'Workspace', items: [
+    { name: 'Dashboard', icon: LayoutDashboard },
+    { name: 'Document', icon: FileText },
+    { name: 'AI Extract', icon: Sparkles },
+    { name: 'Template', icon: Layers },
+  ] },
+  { label: 'Quotations', items: [
+    { name: 'Drafts', icon: FilePen, badge: 'drafts' },
+    { name: 'History', icon: History },
+  ] },
+  { label: 'More', items: [
+    { name: 'Mail Center', icon: Mail },
+    { name: 'My Profile', icon: User },
+    { name: 'Trash', icon: Trash2, badge: 'trash' },
+  ] },
+];
 
-  return (
-    <nav id="app-sidebar" className="sidebar" aria-label="Main menu" aria-hidden={!open} inert={!open} style={{ background: '#5D1CC9', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ color: 'white', fontSize: '22px', fontWeight: '700', padding: '10px 20px', marginBottom: '30px', letterSpacing: '-0.5px' }}>
-        DocAI
+const Sidebar = ({ activeTab, onTabClick, onLogout, onClose, currentUser, counts, open }) => (
+  <nav id="app-sidebar" className="sidebar" aria-label="Main menu" aria-hidden={!open} inert={!open}>
+    <div className="sidebar-header">
+      <div className="sidebar-logo"><Sparkles size={18} /></div>
+      <div className="sidebar-brand">
+        <strong>DocAI</strong>
+        <span>Document workspace</span>
       </div>
+      <button type="button" className="sidebar-close" onClick={onClose} aria-label="Close menu"><X size={18} /></button>
+    </div>
 
-      <ul className="nav-links" style={{ flex: 1 }}>
-        {menuItems.map((item) => (
-          <li
-            key={item.name}
-            className={`nav-item ${activeTab === item.name ? 'active' : ''}`}
-            onClick={() => onTabClick(item.name)}
-            style={activeTab === item.name
-              ? { background: 'white', color: '#5D1CC9', borderRadius: '10px', margin: '4px 10px', padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: '700', fontSize: '14px', transition: 'all 0.2s' }
-              : { color: 'rgba(255,255,255,0.8)', margin: '4px 10px', padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', fontWeight: '500', fontSize: '14px', borderRadius: '10px', transition: 'all 0.2s' }
-            }
-          >
-            {item.icon}
-            <span style={{ flex: 1 }}>{item.name}</span>
-            {item.badge > 0 && (
-              <span style={{ background: activeTab === item.name ? '#5D1CC9' : 'rgba(255,255,255,0.22)', color: 'white', borderRadius: '10px', padding: '1px 8px', fontSize: '11px', fontWeight: '700' }}>{item.badge}</span>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      {/* User footer */}
-      <div style={{ padding: '16px', borderTop: '1px solid rgba(255,255,255,0.15)', marginTop: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-          <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '700', fontSize: '13px', flexShrink: 0 }}>
-            {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
-          </div>
-          <div style={{ overflow: 'hidden' }}>
-            <p style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser?.name || 'User'}</p>
-            <p style={{ margin: 0, fontSize: '11px', color: 'rgba(255,255,255,0.6)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser?.email || ''}</p>
-          </div>
+    <div className="sidebar-scroll">
+      {NAV_SECTIONS.map((section) => (
+        <div className="nav-section" key={section.label}>
+          <div className="nav-section-label">{section.label}</div>
+          <ul className="nav-links">
+            {section.items.map(({ name, icon: Icon, badge }) => {
+              const active = activeTab === name;
+              const count = badge ? counts[badge] : 0;
+              return (
+                <li key={name} className={`nav-item${active ? ' active' : ''}`}>
+                  <button type="button" onClick={() => onTabClick(name)} aria-current={active ? 'page' : undefined}>
+                    <Icon size={18} />
+                    <span className="nav-item-label">{name}</span>
+                    {count > 0 && <span className="nav-badge">{count}</span>}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </div>
-        <button
-          onClick={onLogout}
-          style={{ width: '100%', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', fontWeight: '500', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s' }}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.12)'}
-        >
-          <LogOut size={14} /> Sign out
-        </button>
+      ))}
+    </div>
+
+    <div className="sidebar-footer">
+      <div className="sidebar-user">
+        <div className="sidebar-avatar">{currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}</div>
+        <div className="sidebar-user-text">
+          <p className="sidebar-user-name">{currentUser?.name || 'User'}</p>
+          <p className="sidebar-user-email">{currentUser?.email || ''}</p>
+        </div>
       </div>
-    </nav>
-  );
-};
+      <button type="button" className="sidebar-logout" onClick={onLogout}><LogOut size={14} /> Sign out</button>
+    </div>
+  </nav>
+);
 
 // ── Topbar ────────────────────────────────────────────────────────────────────
 
@@ -493,33 +496,66 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
     }
   }, [showToast]);
 
-  const handleDeleteDocument = useCallback((id) => {
-    handleUpdateDocStatus(id, 'trash');
-    showToast?.('Document moved to trash.', 'info');
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Status changes read the latest list through setAllDocs and a ref, so callbacks created on an earlier
+  // render (e.g. handleDeleteDocument) never act on a stale — or still empty — document list.
+  const allDocsRef = useRef(allDocs);
+  useEffect(() => { allDocsRef.current = allDocs; }, [allDocs]);
+
+  const handleUpdateDocStatus = useCallback(async (id, newStatus, extra = {}) => {
+    const docToUpdate = allDocsRef.current.find((d) => d.id === id);
+    if (!docToUpdate) return false;
+    const updatedDoc = { ...docToUpdate, ...extra, status: newStatus, updatedAt: new Date().toISOString() };
+    setAllDocs((prev) => prev.map((d) => (d.id === id ? updatedDoc : d)));
+    try {
+      await updateDocument(id, { status: newStatus, ...extra });
+      return true;
+    } catch (err) {
+      setAllDocs((prev) => prev.map((d) => (d.id === id ? docToUpdate : d)));
+      showToast?.(err.message || 'Failed to update document.', 'error');
+      return false;
+    }
   }, [showToast]);
 
+  // Remembers the status the document had so Restore puts it back as it was (e.g. Sent, not Final).
+  const handleDeleteDocument = useCallback(async (id) => {
+    const doc = allDocsRef.current.find((d) => d.id === id);
+    if (!doc) return;
+    const quotationData = { ...(doc.quotationData || {}), statusBeforeTrash: doc.status || 'active' };
+    if (await handleUpdateDocStatus(id, 'trash', { quotationData })) showToast?.('Document moved to trash.', 'info');
+  }, [handleUpdateDocStatus, showToast]);
+
+  const handleRestoreDocument = useCallback(async (id) => {
+    const doc = allDocsRef.current.find((d) => d.id === id);
+    if (!doc) return false;
+    const { statusBeforeTrash, ...rest } = doc.quotationData || {};
+    const status = statusBeforeTrash && statusBeforeTrash !== 'trash' ? statusBeforeTrash : 'active';
+    return handleUpdateDocStatus(id, status, { quotationData: rest });
+  }, [handleUpdateDocStatus]);
+
   const handleDeletePermanently = useCallback(async (id) => {
+    const doc = allDocsRef.current.find((d) => d.id === id);
     setAllDocs((prev) => prev.filter((d) => d.id !== id));
     try {
       await deleteDocument(id);
       showToast?.('Document permanently deleted.', 'success');
     } catch (err) {
+      if (doc) setAllDocs((prev) => (prev.some((d) => d.id === id) ? prev : [doc, ...prev]));
       showToast?.(err.message || 'Failed to delete document.', 'error');
     }
   }, [showToast]);
 
   const handleEmptyTrash = useCallback(async () => {
-    const trashIds = allDocs.filter((d) => d.status === 'trash').map((d) => d.id);
+    const trashed = allDocsRef.current.filter((d) => d.status === 'trash');
     setAllDocs((prev) => prev.filter((d) => d.status !== 'trash'));
-    const results = await Promise.allSettled(trashIds.map((id) => deleteDocument(id)));
-    const failed = results.filter((r) => r.status === 'rejected').length;
-    if (failed > 0) {
-      showToast?.(`${failed} item(s) could not be deleted.`, 'warning');
+    const results = await Promise.allSettled(trashed.map((d) => deleteDocument(d.id)));
+    const failedDocs = trashed.filter((_, i) => results[i].status === 'rejected');
+    if (failedDocs.length > 0) {
+      setAllDocs((prev) => [...failedDocs.filter((f) => !prev.some((d) => d.id === f.id)), ...prev]);
+      showToast?.(`${failedDocs.length} item(s) could not be deleted.`, 'warning');
     } else {
       showToast?.('Trash emptied successfully.', 'success');
     }
-  }, [allDocs, showToast]);
+  }, [showToast]);
 
   // Persists quotation form data (company, positions, fees, status, filled PDF) against the
   // document record, so Save-as-Draft and History work across reloads/devices, not just this browser.
@@ -583,20 +619,6 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
     setDraftToDelete(null);
     if (currentSubView === 'editor') { setCurrentSubView(null); setSelectedDoc(null); }
   };
-
-  const handleUpdateDocStatus = useCallback(async (id, newStatus) => {
-    const docToUpdate = allDocs.find((d) => d.id === id);
-    if (!docToUpdate) return;
-    const updatedDoc = { ...docToUpdate, status: newStatus, updatedAt: new Date().toISOString() };
-    setAllDocs((prev) => prev.map((d) => (d.id === id ? updatedDoc : d)));
-    try {
-      await updateDocument(id, { status: newStatus });
-    } catch (err) {
-      // Roll back
-      setAllDocs((prev) => prev.map((d) => (d.id === id ? docToUpdate : d)));
-      showToast?.(err.message || 'Failed to update document.', 'error');
-    }
-  }, [allDocs, showToast]);
 
   const handleRowClick = (doc) => openEditor(doc);
 
@@ -828,7 +850,7 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
         return (
           <TrashView
             docs={filteredTrash}
-            onRestore={(id) => handleUpdateDocStatus(id, 'active')}
+            onRestore={handleRestoreDocument}
             onDeletePermanently={handleDeletePermanently}
             onEmptyTrash={handleEmptyTrash}
             showToast={showToast}
@@ -853,7 +875,8 @@ const Dashboard = ({ currentUser, onLogout, showToast, initialDocId, onConsumeIn
         onTabClick={handleTabClick}
         onLogout={onLogout}
         currentUser={currentUser}
-        draftCount={draftDocs.length}
+        onClose={() => setSidebarOpen(false)}
+        counts={{ drafts: draftDocs.length, trash: trashDocs.length }}
       />
       <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
       <div className="main-content">
